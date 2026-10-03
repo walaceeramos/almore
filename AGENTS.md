@@ -46,9 +46,17 @@ Fases 1 e 2 concluídas. Fase 3 é a próxima.
 - **`src/core/domain` é puro.** Não importa de `features`, de `app` nem de
   biblioteca de UI. São funções testáveis isoladamente.
 - **Uma feature não importa de outra feature.** Código comum sobe para `core`.
-- **Drizzle define o schema; o runtime lê via supabase-js.** O cliente Supabase
-  carrega o JWT do usuário, que é o que faz o Row Level Security valer. Conexão
-  direta por Drizzle usaria papel de serviço e passaria por cima do RLS.
+- **O SQL é a fonte de verdade do banco; o Drizzle serve só para tipos.**
+  Veja "Migrations" abaixo. O runtime lê via supabase-js, porque o cliente
+  Supabase carrega o JWT do usuário, que é o que faz o Row Level Security
+  valer. Conexão direta por Drizzle usaria papel de serviço e passaria por
+  cima do RLS.
+- **Resultado de consulta vem em snake_case; converta na borda.** O Postgres
+  devolve `display_name`, o tipo do Drizzle é `displayName`. Toda query
+  escreve um tipo de linha crua e uma função de conversão, como em
+  `core/auth/session.ts` e `features/exercises/queries.ts`. Nunca castar o
+  retorno direto para o tipo do Drizzle: o cast compila e devolve
+  `undefined` em todo campo.
 - **RLS ligado em toda tabela nova, sem exceção.** Política padrão nega tudo.
   Isso é redundante de propósito com o filtro da aplicação.
 - **`getUser`, nunca `getSession`.** `getSession` confia no cookie sem validar
@@ -92,6 +100,26 @@ Rode no SQL Editor do Supabase, nesta ordem:
 
 Migrations novas seguem a numeração. Nunca edite uma migration já aplicada:
 crie a próxima.
+
+### Migrations: o SQL manda
+
+As migrations são escritas à mão em `supabase/migrations/`. O Drizzle **não**
+gera nem aplica nada neste projeto.
+
+**Não rode `drizzle-kit generate` nem `drizzle-kit push`.** A pasta não é um
+diretório de migrations válido do Drizzle: não existe `meta/_journal.json`, e
+os arquivos `0001` e `0002` foram escritos à mão. `generate` produziria uma
+migration recriando tudo do zero; `push` tentaria alinhar o banco ao
+`schema.ts` e derrubaria o que só existe no SQL.
+
+O que mora no SQL e o `schema.ts` não declara: chaves estrangeiras para
+`auth.users`, todos os CHECK, índices parciais e funcionais, constraints
+como `exercises_slug_scope`, políticas de RLS e triggers.
+
+`src/core/db/schema.ts` existe para dar tipos ao TypeScript (`Profile`,
+`Exercise`, ...). Ao criar uma tabela, escreva a migration SQL primeiro e
+depois espelhe as colunas no `schema.ts`, sabendo que ele é um retrato
+parcial — nunca o contrário.
 
 ## Fase 3 — o que vem agora
 

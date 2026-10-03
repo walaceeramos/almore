@@ -5,10 +5,12 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/core/auth/server";
 import { requireUser } from "@/core/auth/session";
 import { siteUrl } from "@/config/env";
+import { safeInternalPath } from "@/core/utils/safe-path";
 import {
   signInSchema,
   signUpSchema,
   resetSchema,
+  newPasswordSchema,
   onboardingSchema,
   type ActionState,
 } from "./schemas";
@@ -35,8 +37,7 @@ export async function signIn(_prev: ActionState, formData: FormData): Promise<Ac
   });
   if (error) return { error: traduzir(error.message) };
 
-  const destino = parsed.data.proximo?.startsWith("/") ? parsed.data.proximo : "/inicio";
-  redirect(destino);
+  redirect(safeInternalPath(parsed.data.proximo));
 }
 
 export async function signUp(_prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -63,11 +64,27 @@ export async function requestPasswordReset(_prev: ActionState, formData: FormDat
 
   const supabase = await createClient();
   await supabase.auth.resetPasswordForEmail(parsed.data.email, {
-    redirectTo: `${siteUrl}/auth/callback?next=/ajustes`,
+    redirectTo: `${siteUrl}/auth/callback?next=/nova-senha`,
   });
 
   // Resposta idêntica exista ou não a conta, para não vazar quem tem cadastro.
   return { success: "Se existir uma conta com esse e-mail, o link de redefinição chegou na caixa de entrada." };
+}
+
+/**
+ * Fim do fluxo de "esqueci minha senha". O link do e-mail passa pelo
+ * callback, que troca o código por sessão; por isso aqui já há usuário.
+ */
+export async function updatePassword(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  await requireUser();
+  const parsed = newPasswordSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { fieldErrors: parsed.error.flatten().fieldErrors };
+
+  const supabase = await createClient();
+  const { error } = await supabase.auth.updateUser({ password: parsed.data.password });
+  if (error) return { error: traduzir(error.message) };
+
+  redirect("/inicio");
 }
 
 export async function signOut() {

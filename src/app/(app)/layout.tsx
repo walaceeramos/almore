@@ -7,16 +7,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const user = await getCurrentUser();
   if (!user) redirect("/entrar");
 
-  // Perfil incompleto não navega: vai para boas-vindas e fica lá até concluir.
-  const precisaOnboarding = !user.profile?.onboardedAt;
-
-  if (precisaOnboarding) {
-    return (
-      <main className="mx-auto min-h-dvh w-full max-w-lg px-4 py-8 pt-[calc(2rem+env(safe-area-inset-top,0px))]">
-        {children}
-      </main>
-    );
-  }
+  // Perfil incompleto não navega: sai do app e só volta depois de concluir.
+  // /boas-vindas vive no grupo (onboarding), fora daqui, para não dar laço.
+  if (!user.profile?.onboardedAt) redirect("/boas-vindas");
 
   return (
     <div className="lg:pl-60">

@@ -9,6 +9,46 @@ export type SessionUser = {
 };
 
 /**
+ * Linha crua de `profiles`. O Postgres devolve os nomes de coluna em
+ * snake_case; o tipo do Drizzle é camelCase. Sem a conversão abaixo todo
+ * campo lido viria `undefined`, e um cast simples esconderia isso do
+ * compilador. Mesmo padrão de `features/exercises/queries.ts`.
+ */
+type ProfileRow = {
+  id: string;
+  display_name: string;
+  birth_date: string | null;
+  height_cm: number | null;
+  starting_weight_kg: string | null;
+  focus: Profile["focus"];
+  level: Profile["level"];
+  weekly_target: number;
+  units: Profile["units"];
+  timezone: string;
+  onboarded_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+function toProfile(row: ProfileRow): Profile {
+  return {
+    id: row.id,
+    displayName: row.display_name,
+    birthDate: row.birth_date,
+    heightCm: row.height_cm,
+    startingWeightKg: row.starting_weight_kg,
+    focus: row.focus,
+    level: row.level,
+    weeklyTarget: row.weekly_target,
+    units: row.units,
+    timezone: row.timezone,
+    onboardedAt: row.onboarded_at ? new Date(row.onboarded_at) : null,
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+  };
+}
+
+/**
  * Usuário autenticado ou null. Sempre `getUser`, nunca `getSession`:
  * `getSession` confia no cookie sem validar o token no servidor.
  */
@@ -26,7 +66,7 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
   return {
     id: data.user.id,
     email: data.user.email ?? "",
-    profile: (profile as Profile | null) ?? null,
+    profile: profile ? toProfile(profile as ProfileRow) : null,
   };
 }
 

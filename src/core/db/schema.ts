@@ -1,12 +1,14 @@
 /**
- * Fonte única de verdade do banco.
+ * Tipos das tabelas, para o TypeScript. NÃO é a fonte de verdade do banco.
  *
- * Fase 1 define apenas `profiles`. As demais tabelas do planejamento
- * (routines, workout_sessions, sets, ...) entram nas fases seguintes.
+ * A fonte de verdade é o SQL em `supabase/migrations/`, escrito à mão. Este
+ * arquivo é um retrato parcial: não declara chaves estrangeiras para
+ * `auth.users`, CHECK, índices parciais e funcionais, RLS nem triggers.
+ * Não rode `drizzle-kit generate` nem `push` — veja "Migrations" no
+ * AGENTS.md.
  *
- * `profiles.id` é 1:1 com `auth.users.id`. A tabela auth.users não é
- * declarada aqui porque pertence ao schema gerenciado pelo Supabase;
- * a chave estrangeira é criada na migration SQL.
+ * Hoje cobre `profiles` (Fase 1) e o catálogo de exercícios (Fase 2). As
+ * demais tabelas do planejamento entram nas fases seguintes.
  */
 import {
   pgTable,

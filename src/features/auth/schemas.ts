@@ -25,6 +25,16 @@ export const signUpSchema = z.object({
 
 export const resetSchema = z.object({ email: emailSchema });
 
+export const newPasswordSchema = z
+  .object({
+    password: passwordSchema,
+    confirmation: z.string().min(1, "Repita a senha"),
+  })
+  .refine((d) => d.password === d.confirmation, {
+    message: "As senhas não conferem",
+    path: ["confirmation"],
+  });
+
 export const onboardingSchema = z.object({
   displayName: z.string().trim().min(2, "Informe seu nome").max(60),
   heightCm: z.coerce.number().int().min(80).max(260),
