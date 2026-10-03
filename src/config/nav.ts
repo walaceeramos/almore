@@ -18,7 +18,7 @@ export const primaryNav: NavItem[] = [
 
 /** Agrupados sob "Mais" no celular, visíveis na lateral no desktop. */
 export const secondaryNav: NavItem[] = [
-  { href: "/exercicios", label: "Exercícios", icon: BookOpen, soon: true },
+  { href: "/exercicios", label: "Exercícios", icon: BookOpen },
   { href: "/metas", label: "Metas", icon: Target, soon: true },
   { href: "/corpo", label: "Peso e medidas", icon: Scale, soon: true },
   { href: "/ajustes", label: "Ajustes", icon: Settings },
