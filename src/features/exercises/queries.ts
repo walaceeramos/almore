@@ -59,8 +59,32 @@ function toItem(row: Row): ExerciseListItem {
 export async function listExercises(filters: ExerciseFilters): Promise<ExerciseListItem[]> {
   const supabase = await createClient();
 
+  /*
+   * O filtro por grupo muscular vai ao banco antes do `limit`. Antes ele
+   * era aplicado em memória depois da consulta, então o teto de 300 linhas
+   * cortava candidatos que o filtro ainda iria aceitar — resultado
+   * incompleto, e silencioso, assim que o catálogo crescesse.
+   *
+   * São duas etapas porque a junção aninhada do PostgREST, filtrada, só
+   * devolveria o vínculo que casou e descartaria os demais da mesma linha,
+   * e a lista precisa de todos para mostrar primário e secundários.
+   */
+  let idsDoMusculo: string[] | null = null;
+  if (filters.musculo) {
+    const { data, error } = await supabase
+      .from("exercise_muscles")
+      .select("exercise_id")
+      .eq("muscle_id", filters.musculo);
+    if (error) throw new Error(`Falha ao filtrar por grupo muscular: ${error.message}`);
+
+    idsDoMusculo = (data ?? []).map((r) => (r as { exercise_id: string }).exercise_id);
+    if (idsDoMusculo.length === 0) return [];
+  }
+
   // O RLS já limita a catálogo global + próprios. Aqui é só refino.
   let query = supabase.from("exercises").select(SELECT).is("archived_at", null);
+
+  if (idsDoMusculo) query = query.in("id", idsDoMusculo);
 
   if (filters.busca) {
     // Escapa o coringa do PostgREST para a busca não virar padrão arbitrário.
@@ -75,12 +99,7 @@ export async function listExercises(filters: ExerciseFilters): Promise<ExerciseL
   const { data, error } = await query.order("name").limit(300);
   if (error) throw new Error(`Falha ao listar exercícios: ${error.message}`);
 
-  const itens = (data as unknown as Row[]).map(toItem);
-
-  // Filtro por músculo é feito aqui: a junção aninhada do PostgREST não
-  // permite filtrar sem descartar os demais vínculos da mesma linha.
-  if (!filters.musculo) return itens;
-  return itens.filter((e) => e.muscles.some((m) => m.id === filters.musculo));
+  return (data as unknown as Row[]).map(toItem);
 }
 
 export async function getExercise(id: string): Promise<ExerciseListItem | null> {

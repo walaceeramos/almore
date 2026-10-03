@@ -31,7 +31,3 @@ export function restLabel(seconds: number): string {
   const min = seconds / 60;
   return Number.isInteger(min) ? `${min} min` : `${Math.floor(min)} min ${seconds % 60} s`;
 }
-
-export function kg(value: string | number): string {
-  return String(value).replace(/\.?0+$/, "").replace(".", ",");
-}

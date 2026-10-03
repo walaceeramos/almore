@@ -50,7 +50,7 @@ export async function signUp(_prev: ActionState, formData: FormData): Promise<Ac
     password: parsed.data.password,
     options: {
       data: { display_name: parsed.data.displayName },
-      emailRedirectTo: `${siteUrl}/auth/callback`,
+      emailRedirectTo: `${siteUrl()}/auth/callback`,
     },
   });
   if (error) return { error: traduzir(error.message) };
@@ -64,7 +64,7 @@ export async function requestPasswordReset(_prev: ActionState, formData: FormDat
 
   const supabase = await createClient();
   await supabase.auth.resetPasswordForEmail(parsed.data.email, {
-    redirectTo: `${siteUrl}/auth/callback?next=/nova-senha`,
+    redirectTo: `${siteUrl()}/auth/callback?next=/nova-senha`,
   });
 
   // Resposta idêntica exista ou não a conta, para não vazar quem tem cadastro.

@@ -4,7 +4,8 @@ import { ArrowLeft } from "lucide-react";
 import { requireUser } from "@/core/auth/session";
 import { getExercise } from "@/features/exercises/queries";
 import { archiveCustomExercise } from "@/features/exercises/actions";
-import { PATTERN_LABEL, EQUIPMENT_LABEL, restLabel, kg } from "@/features/exercises/labels";
+import { PATTERN_LABEL, EQUIPMENT_LABEL, restLabel } from "@/features/exercises/labels";
+import { kg } from "@/core/utils/format";
 import { Card, CardTitle, EmptyState } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 

@@ -4,8 +4,9 @@
  * A fonte de verdade é o SQL em `supabase/migrations/`, escrito à mão. Este
  * arquivo é um retrato parcial: não declara chaves estrangeiras para
  * `auth.users`, CHECK, índices parciais e funcionais, RLS nem triggers.
- * Não rode `drizzle-kit generate` nem `push` — veja "Migrations" no
- * AGENTS.md.
+ * O Drizzle aqui serve apenas para tipos: nunca gera nem aplica o SQL. O
+ * projeto não tem `drizzle.config.ts` nem scripts de migration — veja
+ * "Migrations" no AGENTS.md.
  *
  * Hoje cobre `profiles` (Fase 1) e o catálogo de exercícios (Fase 2). As
  * demais tabelas do planejamento entram nas fases seguintes.

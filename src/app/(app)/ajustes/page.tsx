@@ -1,5 +1,6 @@
 import { requireUser } from "@/core/auth/session";
 import { Card, CardTitle } from "@/components/ui/card";
+import { kg } from "@/core/utils/format";
 
 export const metadata = { title: "Ajustes · Almore" };
 
@@ -11,7 +12,7 @@ export default async function AjustesPage() {
     ["Nome", p?.displayName ?? "—"],
     ["E-mail", user.email],
     ["Altura", p?.heightCm ? `${p.heightCm} cm` : "—"],
-    ["Peso inicial", p?.startingWeightKg ? `${p.startingWeightKg} kg` : "—"],
+    ["Peso inicial", p?.startingWeightKg ? `${kg(p.startingWeightKg)} kg` : "—"],
     ["Meta semanal", `${p?.weeklyTarget ?? 0} treinos`],
     ["Fuso horário", p?.timezone ?? "—"],
   ];

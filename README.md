@@ -32,6 +32,7 @@ projeto, banco, autenticação, perfil, layout, navegação e dashboard.
    - `supabase/migrations/0001_profiles.sql`
    - `supabase/migrations/0002_exercises.sql`
    - `supabase/seed/0003_exercises_seed.sql`
+   - `supabase/migrations/0004_touch_updated_at_search_path.sql`
 3. Em **Authentication > URL Configuration**, defina Site URL como
    `http://localhost:3000` e adicione `http://localhost:3000/auth/callback`
    em Redirect URLs. Repita com a URL de produção quando publicar.
@@ -62,7 +63,6 @@ Abra http://localhost:3000.
 | `npm run build` | Build de produção |
 | `npm run typecheck` | Checagem de tipos |
 | `npm run lint` | ESLint |
-| `npm run db:generate` | Gera migration a partir do schema Drizzle |
 | `python3 scripts/gerar_seed.py` | Regera o seed de exercícios |
 
 ## Como adicionar exercícios ao catálogo
@@ -73,11 +73,17 @@ rodar de novo atualiza os existentes sem duplicar.
 
 ## Decisões de arquitetura desta fase
 
-**Drizzle define o schema; o runtime lê via supabase-js.** Drizzle é a fonte
-de verdade das tabelas e das migrations. As consultas em tempo de execução
-passam pelo cliente Supabase porque ele carrega o JWT do usuário, o que faz o
-Row Level Security valer de fato. Uma conexão direta por Drizzle usaria o
-papel de serviço e passaria por cima do RLS.
+**Drizzle serve apenas para tipos TypeScript derivados do schema.** A fonte
+de verdade do banco são as migrations SQL escritas à mão em
+`supabase/migrations`, aplicadas manualmente no SQL Editor do Supabase.
+`src/core/db/schema.ts` precisa espelhar o SQL, mas nunca o gera nem o
+aplica. Por isso o projeto não tem `drizzle.config.ts` nem os scripts
+`db:generate` e `db:push`.
+
+**O runtime lê via supabase-js.** As consultas em tempo de execução passam
+pelo cliente Supabase porque ele carrega o JWT do usuário, o que faz o Row
+Level Security valer de fato. Uma conexão direta por Drizzle usaria o papel
+de serviço e passaria por cima do RLS.
 
 **Falha fechada.** Se o Supabase estiver fora do ar, o middleware não
 consegue validar a sessão e manda para o login. É a escolha segura: melhor
