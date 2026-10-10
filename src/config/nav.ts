@@ -11,7 +11,7 @@ export type NavItem = {
 /** Cinco destinos na barra inferior do celular. */
 export const primaryNav: NavItem[] = [
   { href: "/inicio", label: "Início", icon: Home },
-  { href: "/treinos", label: "Treinos", icon: Dumbbell, soon: true },
+  { href: "/treinos", label: "Treinos", icon: Dumbbell },
   { href: "/historico", label: "Histórico", icon: History, soon: true },
   { href: "/progresso", label: "Progresso", icon: TrendingUp, soon: true },
 ];

@@ -144,3 +144,76 @@ export const exerciseMuscles = pgTable(
 export type Muscle = typeof muscles.$inferSelect;
 export type Exercise = typeof exercises.$inferSelect;
 export type ExerciseMuscle = typeof exerciseMuscles.$inferSelect;
+
+/* ------------------------------------------------------------------ *
+ * Fase 3 — programas de treino
+ *
+ * Prescrição, não execução. Como em toda esta folha, os CHECK, o índice
+ * único parcial de rotina ativa, as políticas de RLS e os triggers moram
+ * só na migration 0005.
+ * ------------------------------------------------------------------ */
+
+export const routines = pgTable(
+  "routines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    /** No máximo uma ativa por usuário, garantido por índice parcial no SQL. */
+    isActive: boolean("is_active").notNull().default(false),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("routines_user_idx").on(t.userId)],
+);
+
+export const routineDays = pgTable(
+  "routine_days",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    routineId: uuid("routine_id").notNull(),
+    name: text("name").notNull(),
+    /** Sequência, não calendário. Não é único: ver comentário na 0005. */
+    position: integer("position").notNull(),
+    /** Dica opcional, 0 = domingo. Não amarra o dia ao calendário. */
+    suggestedWeekday: integer("suggested_weekday"),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("routine_days_order_idx").on(t.routineId, t.position)],
+);
+
+export const routineExercises = pgTable(
+  "routine_exercises",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    routineDayId: uuid("routine_day_id").notNull(),
+    /** FK com ON DELETE RESTRICT no SQL: exercício prescrito não se apaga. */
+    exerciseId: uuid("exercise_id").notNull(),
+    position: integer("position").notNull(),
+    targetSets: integer("target_sets").notNull().default(3),
+    /** Faixa de repetições: entrada da progressão dupla na Fase 5. */
+    repMin: integer("rep_min").notNull(),
+    repMax: integer("rep_max").notNull(),
+    targetRir: integer("target_rir"),
+    restSeconds: integer("rest_seconds").notNull().default(120),
+    /** Nulo = usa exercises.load_step_kg. Ver resolveLoadStep em core/domain. */
+    loadStepKgOverride: numeric("load_step_kg_override", { precision: 5, scale: 2 }),
+    /** Mesmo valor no mesmo dia forma um superset. Nulo em toda a Fase 3. */
+    supersetGroup: text("superset_group"),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("routine_exercises_order_idx").on(t.routineDayId, t.position),
+    index("routine_exercises_exercise_idx").on(t.exerciseId),
+  ],
+);
+
+export type Routine = typeof routines.$inferSelect;
+export type RoutineDay = typeof routineDays.$inferSelect;
+export type RoutineExercise = typeof routineExercises.$inferSelect;
