@@ -306,7 +306,8 @@ export async function removeDay(formData: FormData) {
   const routineId = await routineIdOfDay(parsed.data.id);
 
   const supabase = await createClient();
-  // Cascade leva as prescrições do dia. Nenhuma sessão aponta para cá ainda.
+  // Cascade leva as prescrições do dia. As sessões que apontam para ele
+  // ficam com routine_day_id nulo (SET NULL na 0006) e mantêm o snapshot.
   await supabase.from("routine_days").delete().eq("id", parsed.data.id);
 
   revalidar(routineId ?? undefined);

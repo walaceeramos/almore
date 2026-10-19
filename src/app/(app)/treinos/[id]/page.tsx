@@ -4,6 +4,9 @@ import { ArrowLeft, Pencil, Play } from "lucide-react";
 import { requireUser } from "@/core/auth/session";
 import { getRoutine, type RoutineDayDetail } from "@/features/routines/queries";
 import { activateRoutine } from "@/features/routines/actions";
+import { getLastTrainedDayId, getOpenSession } from "@/features/sessions/queries";
+import { StartSessionForm } from "@/features/sessions/components/start-session-form";
+import { nextDayId } from "@/core/domain/next-day";
 import { prescriptionLabel, rirLabel, weekdayLabel } from "@/features/routines/labels";
 import { restLabel } from "@/features/exercises/labels";
 import { kg } from "@/core/utils/format";
@@ -75,6 +78,12 @@ export default async function ProgramaPage({ params }: { params: Promise<{ id: s
   const arquivado = programa.archivedAt !== null;
   const totalExercicios = programa.days.reduce((s, d) => s + d.exercises.length, 0);
 
+  const [aberta, ultimoDia] = await Promise.all([getOpenSession(), getLastTrainedDayId(programa.id)]);
+  const proximoDia = nextDayId(
+    programa.days.map((d) => d.id),
+    ultimoDia,
+  );
+
   return (
     <div className="space-y-5">
       <Link href="/treinos" className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-body">
@@ -95,12 +104,30 @@ export default async function ProgramaPage({ params }: { params: Promise<{ id: s
         {programa.description && <p className="mt-2 text-sm text-muted">{programa.description}</p>}
       </div>
 
+      {aberta ? (
+        <Card className="space-y-3">
+          <div>
+            <p className="text-xs text-faint">Treino em andamento</p>
+            <p className="font-condensed text-lg font-semibold">{aberta.title}</p>
+          </div>
+          <ButtonLink href={`/executar/${aberta.id}`} full>
+            <Play className="size-4" aria-hidden />
+            Retomar treino
+          </ButtonLink>
+        </Card>
+      ) : (
+        !arquivado &&
+        proximoDia && (
+          <Card>
+            <StartSessionForm
+              days={programa.days.map((d) => ({ id: d.id, name: d.name }))}
+              defaultDayId={proximoDia}
+            />
+          </Card>
+        )
+      )}
+
       <div className="flex flex-wrap gap-2">
-        {/* Iniciar depende de workout_sessions, que chega na Fase 4. */}
-        <Button disabled title="A execução do treino chega na fase 4">
-          <Play className="size-4" aria-hidden />
-          Iniciar treino
-        </Button>
         <ButtonLink href={`/treinos/${programa.id}/editar`} variant="secondary">
           <Pencil className="size-4" aria-hidden />
           Editar

@@ -14,14 +14,16 @@ não existir, peça ao usuário antes de tomar decisões de arquitetura.
 
 ## Estado atual
 
-Fases 1 e 2 concluídas. Fase 3 é a próxima.
+Fases 1, 2 e 3 concluídas. Fase 3 validada contra o banco real (rotina
+ativa exclusiva e isolamento entre contas nas três tabelas novas). Fase 4
+implementada, aguardando validação contra o banco real (migration 0006).
 
 | Fase | Estado | O que entrega |
 | --- | --- | --- |
 | 1 | pronta | Fundação, banco, autenticação, perfil, layout, navegação, dashboard |
 | 2 | pronta | Catálogo de exercícios, busca, filtros, exercício personalizado |
-| 3 | próxima | Criar, editar, duplicar e arquivar programas de treino |
-| 4 | — | Execução do treino: registrar série, cronômetro, concluir |
+| 3 | pronta | Criar, editar, duplicar e arquivar programas de treino |
+| 4 | validar | Execução do treino: registrar série, cronômetro, concluir |
 | 5 | — | Regras de domínio: progressão, recordes, 1RM, volume, consistência |
 | 6 | — | Histórico de sessões, com edição retroativa |
 | 7 | — | Gráficos de carga, volume e recordes |
@@ -79,6 +81,14 @@ Fases 1 e 2 concluídas. Fase 3 é a próxima.
 - **Prescrição e execução são coisas distintas.** Um treino é plano; uma sessão
   é o que aconteceu. `session_exercises` guarda snapshot da prescrição vigente,
   senão editar o programa reescreveria o passado.
+- **Execução aponta para o plano com ON DELETE SET NULL.** `workout_sessions`
+  → `routines`/`routine_days` e `session_exercises` → `routine_exercises`.
+  O editor apaga dias e prescrições de verdade; RESTRICT faria isso falhar
+  depois do primeiro treino. A sessão não perde nada, porque o snapshot está
+  nela. Para `exercises` continua RESTRICT.
+- **Id da série é gerado no cliente** (`core/utils/uuid.ts`) e gravado por
+  `upsert`. Repetir o registro cai na mesma linha. Não troque por id do
+  servidor: a fila offline da Fase 9 depende disso.
 
 ## Convenções
 
@@ -108,6 +118,8 @@ Rode no SQL Editor do Supabase, nesta ordem:
 2. `supabase/migrations/0002_exercises.sql`
 3. `supabase/seed/0003_exercises_seed.sql`
 4. `supabase/migrations/0004_touch_updated_at_search_path.sql`
+5. `supabase/migrations/0005_routines.sql`
+6. `supabase/migrations/0006_sessions.sql`
 
 Migrations novas seguem a numeração. Nunca edite uma migration já aplicada:
 crie a próxima.
@@ -132,7 +144,42 @@ todos os CHECK, índices parciais e funcionais, constraints como
 Ao criar uma tabela: escreva a migration SQL primeiro, aplique no SQL
 Editor, depois espelhe as colunas no `schema.ts` — nunca o contrário.
 
-## Fase 3 — o que vem agora
+## Pendências conhecidas
+
+Registradas para não se perderem; nenhuma tem fase atribuída ainda.
+
+- **Lentidão percebida na área de treinos.** A investigar: ainda não se
+  sabe se vem de consulta, de renderização ou de navegação.
+- **Animação de status do treino.** A ajustar.
+- **`kg()` em `core/utils/format.ts` corta zero de número inteiro.**
+  `kg(80)` devolve "8" e `kg(10)` devolve "1"; com string do `numeric`
+  ("80.00") funciona. Afeta o "sobe X kg" do detalhe do programa quando o
+  incremento é 10. A Fase 4 contorna com `toFixed(2)`. Corrigir a função
+  espera autorização (regra 1).
+
+## Fase 4 — escopo entregue
+
+Tabelas `workout_sessions`, `session_exercises` e `sets`, com RLS
+(migration 0006). Execução online, sem TanStack Query nem Dexie — entram
+na Fase 9. Decisões aprovadas pelo usuário:
+
+- Sessão começa sempre de um dia de programa; exercício fora do plano pode
+  ser acrescentado durante o treino (entra sem prescrição, alvos nulos).
+- Uma sessão em andamento por usuário (índice único parcial).
+- Pré-preenchimento: última série de trabalho da sessão, senão a da última
+  vez, senão fundo da faixa com carga zerada. Sugestão de progressão é Fase 5.
+- `weight_kg` nulo = só o peso do corpo; preenchido em exercício de peso
+  corporal = carga adicional.
+- Descartar apaga de verdade, só em andamento (o RLS de DELETE garante).
+- Superset ignorado: exercícios em sequência.
+- Aviso do descanso com tela bloqueada fica para a Fase 9 (service worker).
+  O término é guardado como instante, então o tempo está certo ao desbloquear.
+
+Rotas: `/executar/[sessaoId]` e `/executar/[sessaoId]/resumo`, no grupo
+`(execucao)`, fora de `(app)`, sem navegação. Iniciar fica no detalhe do
+programa e no card "Treino de hoje" do início.
+
+## Fase 3 — escopo entregue
 
 Tabelas `routines`, `routine_days` e `routine_exercises`, com RLS. Telas de
 lista, detalhe e editor de programa. O editor precisa permitir montar dias,

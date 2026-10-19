@@ -8,8 +8,9 @@
  * projeto não tem `drizzle.config.ts` nem scripts de migration — veja
  * "Migrations" no AGENTS.md.
  *
- * Hoje cobre `profiles` (Fase 1) e o catálogo de exercícios (Fase 2). As
- * demais tabelas do planejamento entram nas fases seguintes.
+ * Hoje cobre `profiles` (Fase 1), o catálogo de exercícios (Fase 2), os
+ * programas (Fase 3) e a execução (Fase 4). As demais tabelas do
+ * planejamento entram nas fases seguintes.
  */
 import {
   pgTable,
@@ -217,3 +218,92 @@ export const routineExercises = pgTable(
 export type Routine = typeof routines.$inferSelect;
 export type RoutineDay = typeof routineDays.$inferSelect;
 export type RoutineExercise = typeof routineExercises.$inferSelect;
+
+/* ------------------------------------------------------------------ *
+ * Fase 4 — execução do treino
+ *
+ * Execução, não prescrição. Os CHECK, o índice único parcial de sessão em
+ * andamento, as chaves estrangeiras (SET NULL para o plano, RESTRICT para
+ * exercises), o RLS e os triggers moram só na migration 0006.
+ * ------------------------------------------------------------------ */
+
+export const sessionStatus = pgEnum("session_status", ["em_andamento", "concluida"]);
+export const setKind = pgEnum("set_kind", ["aquecimento", "trabalho"]);
+
+export const workoutSessions = pgTable(
+  "workout_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    /** Nulo quando o programa ou o dia foram apagados: o snapshot basta. */
+    routineId: uuid("routine_id"),
+    routineDayId: uuid("routine_day_id"),
+    /** "Programa · Dia" no momento do início. */
+    titleSnapshot: text("title_snapshot").notNull(),
+    /** No máximo uma em andamento por usuário, garantido por índice parcial no SQL. */
+    status: sessionStatus("status").notNull().default("em_andamento"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    perceivedEffort: integer("perceived_effort"),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("workout_sessions_user_idx").on(t.userId, t.startedAt),
+    index("workout_sessions_routine_idx").on(t.routineId),
+    index("workout_sessions_routine_day_idx").on(t.routineDayId),
+  ],
+);
+
+export const sessionExercises = pgTable(
+  "session_exercises",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sessionId: uuid("session_id").notNull(),
+    /** FK com ON DELETE RESTRICT no SQL: exercício com histórico não se apaga. */
+    exerciseId: uuid("exercise_id").notNull(),
+    /** Nulo para exercício acrescentado na hora ou prescrição removida. */
+    routineExerciseId: uuid("routine_exercise_id"),
+    position: integer("position").notNull(),
+    /** Snapshot da prescrição. Os três alvos são nulos juntos. */
+    targetSets: integer("target_sets"),
+    repMin: integer("rep_min"),
+    repMax: integer("rep_max"),
+    targetRir: integer("target_rir"),
+    restSeconds: integer("rest_seconds").notNull(),
+    /** Incremento já resolvido no início da sessão. */
+    loadStepKg: numeric("load_step_kg", { precision: 5, scale: 2 }).notNull(),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("session_exercises_order_idx").on(t.sessionId, t.position),
+    index("session_exercises_exercise_idx").on(t.exerciseId, t.createdAt),
+    index("session_exercises_routine_exercise_idx").on(t.routineExerciseId),
+  ],
+);
+
+export const sets = pgTable(
+  "sets",
+  {
+    /** Gerado no cliente, para o registro ser idempotente. */
+    id: uuid("id").primaryKey().defaultRandom(),
+    sessionExerciseId: uuid("session_exercise_id").notNull(),
+    setNumber: integer("set_number").notNull(),
+    kind: setKind("kind").notNull().default("trabalho"),
+    /** Nulo = só o peso do corpo. */
+    weightKg: numeric("weight_kg", { precision: 6, scale: 2 }),
+    reps: integer("reps").notNull(),
+    rir: integer("rir"),
+    completedAt: timestamp("completed_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("sets_order_idx").on(t.sessionExerciseId, t.setNumber)],
+);
+
+export type WorkoutSession = typeof workoutSessions.$inferSelect;
+export type SessionExercise = typeof sessionExercises.$inferSelect;
+export type WorkoutSet = typeof sets.$inferSelect;
