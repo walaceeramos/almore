@@ -18,6 +18,47 @@ export function localDate(date: Date, timeZone: string): string {
   }).format(date);
 }
 
+/** "18:30" no fuso informado. */
+export function localTime(date: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(
+    date,
+  );
+}
+
+/** Quanto o fuso está à frente do UTC naquele instante, em ms. */
+function offsetMs(instante: number, timeZone: string): number {
+  const partes = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(new Date(instante));
+  const v = (tipo: string) => Number(partes.find((p) => p.type === tipo)?.value);
+  const comoUtc = Date.UTC(v("year"), v("month") - 1, v("day"), v("hour"), v("minute"), v("second"));
+  return comoUtc - Math.floor(instante / 1000) * 1000;
+}
+
+/**
+ * O instante em que o relógio do fuso marca aquela data e hora. É o
+ * inverso de `localDate` + `localTime`: o usuário digita "20/10 às 18:30"
+ * no horário dele, e o banco guarda UTC.
+ *
+ * Duas passadas: a primeira estimativa pode cair do outro lado de uma
+ * troca de horário de verão, e a segunda corrige.
+ */
+export function zonedToUtc(ymd: string, hm: string, timeZone: string): Date {
+  const [y, m, d] = ymd.split("-").map(Number) as [number, number, number];
+  const [h, min] = hm.split(":").map(Number) as [number, number];
+  const relogio = Date.UTC(y, m - 1, d, h, min);
+  let utc = relogio - offsetMs(relogio, timeZone);
+  utc = relogio - offsetMs(utc, timeZone);
+  return new Date(utc);
+}
+
 /** "1 h 05 min", "42 min", "50 s". */
 export function durationLabel(totalSeconds: number): string {
   const s = Math.max(0, Math.floor(totalSeconds));

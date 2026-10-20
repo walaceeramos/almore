@@ -17,7 +17,8 @@ não existir, peça ao usuário antes de tomar decisões de arquitetura.
 Fases 1 a 4 concluídas. Fase 4 validada pelo usuário no banco real:
 treino iniciado, séries registradas com cronômetro, treino concluído.
 Fase 5 implementada, aguardando validação contra o banco real (migration
-0007).
+0007). Fase 6 implementada, aguardando validação (migrations 0007 e
+0008).
 
 | Fase | Estado | O que entrega |
 | --- | --- | --- |
@@ -26,7 +27,7 @@ Fase 5 implementada, aguardando validação contra o banco real (migration
 | 3 | pronta | Criar, editar, duplicar e arquivar programas de treino |
 | 4 | pronta | Execução do treino: registrar série, cronômetro, concluir |
 | 5 | validar | Regras de domínio: progressão, recordes, 1RM, volume, consistência |
-| 6 | — | Histórico de sessões, com edição retroativa |
+| 6 | validar | Histórico de sessões, com edição retroativa |
 | 7 | — | Gráficos de carga, volume e recordes |
 | 8 | — | Metas, peso e medidas |
 | 9 | — | Offline, fila de sincronização, PWA |
@@ -123,6 +124,7 @@ Rode no SQL Editor do Supabase, nesta ordem:
 5. `supabase/migrations/0005_routines.sql`
 6. `supabase/migrations/0006_sessions.sql`
 7. `supabase/migrations/0007_personal_records.sql`
+8. `supabase/migrations/0008_delete_finished_sessions.sql`
 
 Migrations novas seguem a numeração. Nunca edite uma migration já aplicada:
 crie a próxima.
@@ -151,14 +153,40 @@ Editor, depois espelhe as colunas no `schema.ts` — nunca o contrário.
 
 Registradas para não se perderem; nenhuma tem fase atribuída ainda.
 
-- **Lentidão percebida na área de treinos.** A investigar: ainda não se
-  sabe se vem de consulta, de renderização ou de navegação.
+- **Lentidão percebida na área de treinos.** Investigada na Fase 6, por
+  leitura de código (sem medição). Causas prováveis, aguardando
+  autorização para corrigir: nenhuma rota tem `loading.tsx`, então o toque
+  não dá retorno até o servidor responder; `getCurrentUser` roda duas vezes
+  por página (layout e página), cada uma com `auth.getUser` (ida à rede) e
+  leitura de `profiles`, além do `getUser` do middleware; `generateMetadata`
+  repete `getRoutine` em `/treinos/[id]` e no editor; o editor recarrega o
+  catálogo inteiro a cada navegação.
 - **Animação de status do treino.** A ajustar.
 - **`kg()` em `core/utils/format.ts` corta zero de número inteiro.**
   `kg(80)` devolve "8" e `kg(10)` devolve "1"; com string do `numeric`
   ("80.00") funciona. Afeta o "sobe X kg" do detalhe do programa quando o
   incremento é 10. A Fase 4 contorna com `toFixed(2)`. Corrigir a função
   espera autorização (regra 1).
+
+## Fase 6 — escopo entregue
+
+`/historico` (calendário do mês, lista por dia, filtro por programa) e
+`/historico/[sessaoId]` (correção de série, exercício, data, horário,
+esforço, observação; exclusão do treino). Migration 0008 libera excluir
+treino concluído. Decisões aprovadas pelo usuário:
+
+- Excluir treino concluído, em dois toques, recalculando os recordes.
+- Data e horário editáveis, digitados no fuso do usuário
+  (`zonedToUtc`). Mudar o início desloca as séries pelo mesmo tanto.
+- Salva a cada alteração, sem botão de salvar tudo, como no editor.
+- Remover exercício de treino antigo, com as séries, após confirmação.
+- Filtro só por mês e programa; por exercício fica para a Fase 7.
+
+Toda correção em treino concluído recalcula os recordes dos exercícios
+afetados (`saveSet` e `deleteSet` verificam o status da sessão). Volume,
+sequência, veredito e estagnação não precisam: são calculados na leitura.
+Os campos de série (`components/set-fields.tsx`) são compartilhados entre
+execução e histórico.
 
 ## Fase 5 — escopo entregue
 

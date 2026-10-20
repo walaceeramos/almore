@@ -25,7 +25,23 @@ export const saveSetSchema = z.object({
   weightKg: opcional(z.coerce.number().min(0, "Carga não pode ser negativa").max(999.99)),
   reps: z.coerce.number().int().min(0).max(100),
   rir: opcional(z.coerce.number().int().min(0).max(10)),
+  /**
+   * Só o histórico manda: série acrescentada num treino antigo precisa da
+   * data dele, não de agora. Na execução fica de fora e o banco usa now().
+   */
+  completedAt: z.string().datetime({ offset: true }).optional(),
 });
+
+export const updateSessionSchema = z
+  .object({
+    id: uuidSchema,
+    /** No fuso do usuário, como o campo de data devolve. */
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data inválida"),
+    start: z.string().regex(/^\d{2}:\d{2}$/, "Horário inválido"),
+    end: z.string().regex(/^\d{2}:\d{2}$/, "Horário inválido"),
+    perceivedEffort: opcional(z.coerce.number().int().min(1).max(10)),
+    notes: z.string().trim().max(500, "No máximo 500 caracteres").optional(),
+  });
 
 export const setIdSchema = z.object({ id: uuidSchema });
 
@@ -43,4 +59,6 @@ export const finishSessionSchema = z.object({
 export type SessionActionState = {
   error?: string;
   fieldErrors?: Record<string, string[]>;
+  /** Formulário que fica na tela depois de salvar precisa dizer que salvou. */
+  ok?: boolean;
 };

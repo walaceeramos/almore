@@ -334,6 +334,71 @@ export async function getRecentHistory(
 }
 
 /* ------------------------------------------------------------------ *
+ * Histórico
+ * ------------------------------------------------------------------ */
+
+export type HistoryItem = {
+  id: string;
+  title: string;
+  routineId: string | null;
+  startedAt: Date;
+  finishedAt: Date;
+  exerciseCount: number;
+  sets: { kind: SetKind; weightKg: string | null; reps: number }[];
+};
+
+type HistoryListRow = {
+  id: string;
+  title_snapshot: string;
+  routine_id: string | null;
+  started_at: string;
+  finished_at: string;
+  session_exercises: { sets: { kind: SetKind; weight_kg: string | null; reps: number }[] | null }[] | null;
+};
+
+/**
+ * Treinos concluídos que começaram no intervalo, do mais recente para o
+ * mais antigo. O intervalo chega com folga de um dia de cada lado; o
+ * recorte exato do mês, no fuso do usuário, fica com a página.
+ */
+export async function listFinishedBetween(
+  from: Date,
+  to: Date,
+  routineId?: string,
+): Promise<HistoryItem[]> {
+  const supabase = await createClient();
+
+  let consulta = supabase
+    .from("workout_sessions")
+    .select("id, title_snapshot, routine_id, started_at, finished_at, session_exercises ( sets ( kind, weight_kg, reps ) )")
+    .eq("status", "concluida")
+    .gte("started_at", from.toISOString())
+    .lt("started_at", to.toISOString())
+    .order("started_at", { ascending: false });
+
+  if (routineId) consulta = consulta.eq("routine_id", routineId);
+
+  const { data, error } = await consulta;
+  if (error || !data) return [];
+
+  return (data as unknown as HistoryListRow[]).map((r) => {
+    const exercicios = r.session_exercises ?? [];
+    return {
+      id: r.id,
+      title: r.title_snapshot,
+      routineId: r.routine_id,
+      startedAt: new Date(r.started_at),
+      finishedAt: new Date(r.finished_at),
+      // Exercício que ficou sem série não foi feito.
+      exerciseCount: exercicios.filter((e) => (e.sets ?? []).length > 0).length,
+      sets: exercicios.flatMap((e) =>
+        (e.sets ?? []).map((s) => ({ kind: s.kind, weightKg: s.weight_kg, reps: s.reps })),
+      ),
+    };
+  });
+}
+
+/* ------------------------------------------------------------------ *
  * Recordes
  * ------------------------------------------------------------------ */
 

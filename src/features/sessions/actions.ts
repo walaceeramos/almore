@@ -13,8 +13,10 @@ import {
   setIdSchema,
   addSessionExerciseSchema,
   finishSessionSchema,
+  updateSessionSchema,
   type SessionActionState,
 } from "./schemas";
+import { zonedToUtc } from "@/core/utils/date";
 
 /** Violação de unicidade no Postgres. Aqui, só o índice de sessão aberta. */
 const UNIQUE_VIOLATION = "23505";
@@ -245,6 +247,7 @@ export async function addSessionExercise(formData: FormData): Promise<SessionAct
   if (error) return { error: "Não foi possível adicionar o exercício. Tente de novo." };
 
   revalidatePath(`/executar/${parsed.data.sessionId}`);
+  revalidatePath(`/historico/${parsed.data.sessionId}`);
   return {};
 }
 
@@ -286,7 +289,7 @@ export async function removeSessionExercise(formData: FormData): Promise<Session
  * tentar de novo depois de um timeout.
  */
 export async function saveSet(formData: FormData): Promise<SessionActionState> {
-  await requireUser();
+  const user = await requireUser();
   const parsed = saveSetSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
     const primeiro = Object.values(parsed.error.flatten().fieldErrors)[0]?.[0];
@@ -305,12 +308,32 @@ export async function saveSet(formData: FormData): Promise<SessionActionState> {
       weight_kg: s.weightKg === null ? null : s.weightKg.toFixed(2),
       reps: s.reps,
       rir: s.rir,
+      ...(s.completedAt ? { completed_at: s.completedAt } : {}),
     },
     { onConflict: "id" },
   );
 
   if (error) return { error: "A série não foi salva. Toque para tentar de novo." };
+
+  await recalcularSeConcluida(user.id, s.sessionExerciseId);
   return {};
+}
+
+/**
+ * Corrigir uma série de treino concluído muda os recordes daquele
+ * exercício. Na execução a sessão ainda está em andamento e isto não faz
+ * nada além de uma consulta: os recordes são recalculados ao concluir.
+ */
+async function recalcularSeConcluida(userId: string, sessionExerciseId: string) {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("session_exercises")
+    .select("exercise_id, workout_sessions!inner ( status )")
+    .eq("id", sessionExerciseId)
+    .maybeSingle();
+
+  const linha = data as { exercise_id: string; workout_sessions: { status: string } | null } | null;
+  if (linha?.workout_sessions?.status === "concluida") await recomputeRecords(userId, [linha.exercise_id]);
 }
 
 /**
@@ -319,7 +342,7 @@ export async function saveSet(formData: FormData): Promise<SessionActionState> {
  * metade se a conexão caísse no meio.
  */
 export async function deleteSet(formData: FormData): Promise<SessionActionState> {
-  await requireUser();
+  const user = await requireUser();
   const parsed = setIdSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { error: "Série inválida." };
 
@@ -344,5 +367,157 @@ export async function deleteSet(formData: FormData): Promise<SessionActionState>
 
   if (linhas.length > 0) await supabase.from("sets").upsert(linhas, { onConflict: "id" });
 
+  await recalcularSeConcluida(user.id, pai);
   return {};
+}
+
+/* ------------------------------------------------------------------ *
+ * Histórico: correção de treino concluído
+ *
+ * Cada correção recalcula os recordes dos exercícios afetados. Volume,
+ * sequência, veredito e estagnação não precisam: são calculados das
+ * séries na hora em que alguém olha.
+ * ------------------------------------------------------------------ */
+
+/** Exercícios de uma sessão, para saber o que recalcular. */
+async function exerciseIdsOf(sessionId: string): Promise<string[]> {
+  const supabase = await createClient();
+  const { data } = await supabase.from("session_exercises").select("exercise_id").eq("session_id", sessionId);
+  return [...new Set(((data ?? []) as { exercise_id: string }[]).map((e) => e.exercise_id))];
+}
+
+/** Um dia é o teto: mais que isso é quase certamente data digitada errada. */
+const DURACAO_MAXIMA_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Data, horário, esforço e observação.
+ *
+ * O usuário digita no horário dele; o banco guarda UTC. Fim antes do
+ * início significa que o treino atravessou a meia-noite.
+ *
+ * Mudar o início desloca as séries junto, pelo mesmo tanto: o horário de
+ * cada série ordena os recordes (quem chegou primeiro) e não pode ficar
+ * no dia antigo.
+ */
+export async function updateSession(_prev: SessionActionState, formData: FormData): Promise<SessionActionState> {
+  const user = await requireUser();
+  const parsed = updateSessionSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { fieldErrors: parsed.error.flatten().fieldErrors };
+
+  const fuso = user.profile?.timezone ?? "America/Sao_Paulo";
+  const inicio = zonedToUtc(parsed.data.date, parsed.data.start, fuso);
+  let fim = zonedToUtc(parsed.data.date, parsed.data.end, fuso);
+  if (fim.getTime() <= inicio.getTime()) fim = new Date(fim.getTime() + 24 * 60 * 60 * 1000);
+
+  if (fim.getTime() - inicio.getTime() > DURACAO_MAXIMA_MS) {
+    return { fieldErrors: { end: ["O treino não pode durar mais de 24 horas."] } };
+  }
+  if (fim.getTime() > Date.now() + 5 * 60 * 1000) {
+    return { fieldErrors: { end: ["O fim do treino não pode estar no futuro."] } };
+  }
+
+  const supabase = await createClient();
+  const { data: atual } = await supabase
+    .from("workout_sessions")
+    .select("started_at, status")
+    .eq("id", parsed.data.id)
+    .maybeSingle();
+
+  const sessao = atual as { started_at: string; status: string } | null;
+  if (!sessao) return { error: "Treino não encontrado." };
+  if (sessao.status !== "concluida") return { error: "Conclua o treino antes de corrigir pelo histórico." };
+
+  const { error } = await supabase
+    .from("workout_sessions")
+    .update({
+      started_at: inicio.toISOString(),
+      finished_at: fim.toISOString(),
+      perceived_effort: parsed.data.perceivedEffort,
+      notes: parsed.data.notes || null,
+    })
+    .eq("id", parsed.data.id);
+
+  if (error) return { error: "Não foi possível salvar. Tente de novo." };
+
+  const delta = inicio.getTime() - new Date(sessao.started_at).getTime();
+  if (delta !== 0) {
+    const { data: series } = await supabase
+      .from("sets")
+      .select("id, session_exercise_id, set_number, reps, completed_at, session_exercises!inner ( session_id )")
+      .eq("session_exercises.session_id", parsed.data.id);
+
+    type Linha = { id: string; session_exercise_id: string; set_number: number; reps: number; completed_at: string };
+    const deslocadas = ((series ?? []) as unknown as Linha[]).map((l) => ({
+      id: l.id,
+      session_exercise_id: l.session_exercise_id,
+      set_number: l.set_number,
+      reps: l.reps,
+      completed_at: new Date(new Date(l.completed_at).getTime() + delta).toISOString(),
+    }));
+    // Upsert numa instrução só, pelo mesmo motivo da renumeração.
+    if (deslocadas.length > 0) await supabase.from("sets").upsert(deslocadas, { onConflict: "id" });
+
+    await recomputeRecords(user.id, await exerciseIdsOf(parsed.data.id));
+  }
+
+  revalidatePath(`/historico/${parsed.data.id}`);
+  return { ok: true };
+}
+
+/**
+ * Remove um exercício de treino concluído, com as séries. Na execução só
+ * se remove exercício sem série (removeSessionExercise); aqui o usuário
+ * confirma em dois toques que quer apagar o que registrou.
+ */
+export async function removeHistoryExercise(formData: FormData): Promise<SessionActionState> {
+  const user = await requireUser();
+  const parsed = sessionIdSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: "Exercício inválido." };
+
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("session_exercises")
+    .select("session_id, exercise_id")
+    .eq("id", parsed.data.id)
+    .maybeSingle();
+
+  const linha = data as { session_id: string; exercise_id: string } | null;
+  if (!linha) return { error: "Exercício não encontrado." };
+
+  const { error } = await supabase.from("session_exercises").delete().eq("id", parsed.data.id);
+  if (error) return { error: "Não foi possível remover o exercício. Tente de novo." };
+
+  await recomputeRecords(user.id, [linha.exercise_id]);
+  revalidatePath(`/historico/${linha.session_id}`);
+  return {};
+}
+
+/**
+ * Exclui um treino concluído. Depende da 0008, que liberou o DELETE para
+ * qualquer sessão do usuário. Os exercícios são lidos antes de apagar,
+ * porque o cascade leva o vínculo junto.
+ */
+export async function deleteSession(_prev: SessionActionState, formData: FormData): Promise<SessionActionState> {
+  const user = await requireUser();
+  const parsed = sessionIdSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: "Treino inválido." };
+
+  const exercicios = await exerciseIdsOf(parsed.data.id);
+
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("workout_sessions")
+    .delete()
+    .eq("id", parsed.data.id)
+    .select("routine_id")
+    .maybeSingle();
+
+  // Nada apagado: sessão de outro, já apagada, ou a 0008 ainda não rodou —
+  // o RLS antigo recusa em silêncio, sem erro.
+  if (!data) return { error: "Não foi possível excluir o treino. Tente de novo." };
+
+  await recomputeRecords(user.id, exercicios);
+  revalidar((data as { routine_id: string | null } | null)?.routine_id);
+  revalidatePath("/historico");
+  redirect("/historico");
 }

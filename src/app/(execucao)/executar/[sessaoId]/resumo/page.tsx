@@ -128,6 +128,9 @@ export default async function ResumoPage({ params }: { params: Promise<{ sessaoI
           <ButtonLink href="/inicio" full>
             Voltar ao início
           </ButtonLink>
+          <ButtonLink href={`/historico/${sessao.id}`} variant="ghost" full>
+            Corrigir no histórico
+          </ButtonLink>
         </>
       ) : (
         <ConcluirForm sessionId={sessao.id} />
