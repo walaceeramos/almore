@@ -4,7 +4,11 @@
  * segunda — e a contagem da semana erraria sem esta conversão.
  */
 
-/** "2026-10-19" no fuso informado. O formato en-CA já sai como AAAA-MM-DD. */
+/**
+ * "2026-10-19" no fuso informado. O formato en-CA já sai como AAAA-MM-DD,
+ * que é o que `core/domain/consistency` recebe; comparar strings nesse
+ * formato é comparar datas.
+ */
 export function localDate(date: Date, timeZone: string): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone,
@@ -12,19 +16,6 @@ export function localDate(date: Date, timeZone: string): string {
     month: "2-digit",
     day: "2-digit",
   }).format(date);
-}
-
-/**
- * Segunda-feira da semana de `date`, no fuso informado, como AAAA-MM-DD.
- * Comparar strings nesse formato é comparar datas.
- */
-export function localWeekStart(date: Date, timeZone: string): string {
-  const [y, m, d] = localDate(date, timeZone).split("-").map(Number) as [number, number, number];
-  // Meio-dia em UTC para o dia da semana não escorregar com horário de verão.
-  const meioDia = new Date(Date.UTC(y, m - 1, d, 12));
-  const desdeSegunda = (meioDia.getUTCDay() + 6) % 7;
-  meioDia.setUTCDate(meioDia.getUTCDate() - desdeSegunda);
-  return meioDia.toISOString().slice(0, 10);
 }
 
 /** "1 h 05 min", "42 min", "50 s". */

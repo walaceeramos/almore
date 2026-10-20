@@ -11,6 +11,8 @@ import {
   Plus,
   RotateCcw,
   Sun,
+  TrendingDown,
+  Trophy,
   SunDim,
   Trash2,
   X,
@@ -22,6 +24,8 @@ import {
   removeSessionExercise,
   saveSet,
 } from "@/features/sessions/actions";
+import type { ProgressionVerdict } from "@/core/domain/progression";
+import { sessionRecordMarks, type SetRecordKind } from "@/core/domain/records";
 import { newId } from "@/core/utils/uuid";
 import { kg } from "@/core/utils/format";
 import { clockLabel } from "@/core/utils/date";
@@ -56,6 +60,11 @@ export type ExercicioExec = {
   rir: string | null;
   descanso: string;
   anterior: { data: string; series: { kind: Tipo; weightKg: number | null; reps: number }[] } | null;
+  /** Calculado no servidor sobre o histórico, sem a sessão atual. */
+  veredito: ProgressionVerdict;
+  estagnado: boolean;
+  /** Recordes de série anteriores a esta sessão. Vazio na primeira vez. */
+  recordes: Partial<Record<SetRecordKind, number>>;
 };
 
 export type SerieExec = {
@@ -92,11 +101,11 @@ function completo(ex: ExercicioExec, series: SerieExec[]): boolean {
 }
 
 /**
- * Valores pré-preenchidos da próxima série. A sugestão de progressão é da
- * Fase 5; até lá, repete o que faz sentido repetir:
+ * Valores pré-preenchidos da próxima série:
  *
- * 1. a última série de trabalho desta sessão, se já houver;
- * 2. senão, a série de mesmo número da última vez, ou a última delas;
+ * 1. a última série de trabalho desta sessão, se já houver — a carga do
+ *    dia já foi escolhida;
+ * 2. senão, a sugestão de progressão (carga e repetições do veredito);
  * 3. senão, primeira vez: fundo da faixa e carga em branco.
  */
 function sugestao(ex: ExercicioExec, series: SerieExec[]): Rascunho {
@@ -114,11 +123,40 @@ function sugestao(ex: ExercicioExec, series: SerieExec[]): Rascunho {
     };
   }
 
-  const anteriores = ex.anterior?.series.filter((s) => s.kind === "trabalho") ?? [];
-  const ref = anteriores[trabalhoFeitas(series)] ?? anteriores.at(-1);
-  if (ref) return { peso: ref.weightKg ?? 0, reps: ref.reps, rir, usaRir, aquecimento: false };
+  return { peso: ex.veredito.weightKg ?? 0, reps: ex.veredito.reps, rir, usaRir, aquecimento: false };
+}
 
-  return { peso: 0, reps: ex.repMin ?? 10, rir, usaRir, aquecimento: false };
+const RECORDE_LABEL: Record<SetRecordKind, string> = {
+  carga_maxima: "carga",
+  melhor_serie: "1RM",
+  volume_serie: "volume",
+};
+
+const VEREDITO: Record<ProgressionVerdict["action"], { rotulo: string; classe: string }> = {
+  subir: { rotulo: "Subir carga", classe: "border-good/40 bg-good/10 text-good" },
+  manter: { rotulo: "Manter carga", classe: "border-brand/40 bg-brand/10 text-brand" },
+  reduzir: { rotulo: "Reduzir carga", classe: "border-bad/40 bg-bad/10 text-bad" },
+  primeira_vez: { rotulo: "Primeira vez", classe: "border-line bg-raised text-muted" },
+};
+
+/** O veredito de progressão antes da primeira série do exercício. */
+function SeloVeredito({ ex }: { ex: ExercicioExec }) {
+  const v = ex.veredito;
+  const visual = VEREDITO[v.action];
+  const alvo =
+    v.action === "primeira_vez"
+      ? null
+      : `${v.weightKg === null ? "Peso corporal" : pesoLabel(ex, v.weightKg)} × ${v.reps}`;
+
+  return (
+    <div className={cn("rounded border px-3 py-2", visual.classe)}>
+      <p className="flex flex-wrap items-baseline gap-x-2 text-sm font-semibold">
+        {visual.rotulo}
+        {alvo && <span className="font-condensed text-base tabular-nums">{alvo}</span>}
+      </p>
+      <p className="mt-0.5 text-[13px] text-body/80">{v.reason}</p>
+    </div>
+  );
 }
 
 function pesoLabel(ex: ExercicioExec, peso: number | null): string {
@@ -240,6 +278,7 @@ function LinhaSerie({
   ex,
   serie,
   indice,
+  recordes,
   onSalvar,
   onRemover,
   onTentarDeNovo,
@@ -247,6 +286,8 @@ function LinhaSerie({
   ex: ExercicioExec;
   serie: SerieExec;
   indice: number;
+  /** Recordes que esta série bateu, na hora em que foi feita. */
+  recordes: SetRecordKind[];
   onSalvar: (s: SerieExec) => void;
   onRemover: () => void;
   onTentarDeNovo: () => void;
@@ -313,6 +354,12 @@ function LinhaSerie({
           )}
         </span>
         {serie.kind === "aquecimento" && <Badge tone="muted">aquecimento</Badge>}
+        {recordes.length > 0 && (
+          <Badge tone="brand" className="shrink-0">
+            <Trophy className="mr-1 size-3" aria-hidden />
+            Recorde: {recordes.map((k) => RECORDE_LABEL[k]).join(", ")}
+          </Badge>
+        )}
         {serie.estado === "erro" ? (
           <RotateCcw className="size-4 shrink-0 text-bad" aria-hidden />
         ) : (
@@ -350,6 +397,8 @@ function PainelExercicio({
   const [rascunho, setRascunho] = useState<Rascunho>(() => sugestao(ex, series));
   const feitas = trabalhoFeitas(series);
   const terminou = completo(ex, series);
+  // Recalculado a cada render: corrigir uma série muda as marcas das seguintes.
+  const marcas = sessionRecordMarks(series, ex.recordes);
 
   function concluir() {
     onConcluir({
@@ -389,6 +438,20 @@ function PainelExercicio({
         )}
       </div>
 
+      {/* O veredito vale para a primeira série de trabalho; depois dela, a
+          carga do dia já foi escolhida e o selo só ocuparia espaço. */}
+      {feitas === 0 && <SeloVeredito ex={ex} />}
+
+      {ex.estagnado && (
+        <div className="flex gap-2 rounded border border-line bg-surface px-3 py-2 text-[13px] text-muted">
+          <TrendingDown className="mt-0.5 size-4 shrink-0 text-faint" aria-hidden />
+          <p>
+            Três sessões sem subir carga nem repetições. Antes de trocar o exercício, vale olhar sono, alimentação e
+            fadiga acumulada.
+          </p>
+        </div>
+      )}
+
       {series.length > 0 && (
         <ul className="divide-y divide-line overflow-hidden rounded border border-line bg-surface">
           {series.map((s, i) => (
@@ -397,6 +460,7 @@ function PainelExercicio({
               ex={ex}
               serie={s}
               indice={i + 1}
+              recordes={marcas[i] ?? []}
               onSalvar={onSalvar}
               onRemover={() => onRemover(s)}
               onTentarDeNovo={() => onSalvar(s)}

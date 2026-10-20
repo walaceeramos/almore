@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Trophy } from "lucide-react";
 import { requireUser } from "@/core/auth/session";
-import { getSession } from "@/features/sessions/queries";
+import { getSession, listSessionRecords } from "@/features/sessions/queries";
+import { RECORD_LABEL, recordValue } from "@/features/sessions/labels";
 import { tonnageKg } from "@/core/domain/volume";
 import { durationLabel } from "@/core/utils/date";
 import { kg } from "@/core/utils/format";
@@ -35,6 +36,8 @@ export default async function ResumoPage({ params }: { params: Promise<{ sessaoI
   if (!sessao) notFound();
 
   const concluida = sessao.status === "concluida";
+  // Só existem depois de concluir: é a conclusão que recalcula os recordes.
+  const recordes = concluida ? await listSessionRecords(sessao.id) : [];
   const fim = sessao.finishedAt ?? new Date();
   const todas = sessao.exercises.flatMap((e) => e.sets);
   const trabalho = todas.filter((s) => s.kind === "trabalho").length;
@@ -65,6 +68,26 @@ export default async function ResumoPage({ params }: { params: Promise<{ sessaoI
       <p className="-mt-3 text-xs text-faint">
         Tonelagem soma carga × repetições nas séries de trabalho com carga. Aquecimento e peso corporal não entram.
       </p>
+
+      {recordes.length > 0 && (
+        <section className="space-y-2">
+          <CardTitle className="flex items-center gap-2">
+            <Trophy className="size-4 text-brand" aria-hidden />
+            Recordes batidos
+          </CardTitle>
+          <ul className="divide-y divide-line rounded border border-brand/40 bg-brand/5">
+            {recordes.map((r) => (
+              <li key={`${r.exerciseId}-${r.kind}`} className="flex items-baseline justify-between gap-3 px-4 py-2.5">
+                <span className="min-w-0">
+                  <span className="block truncate text-[15px] font-medium">{r.exerciseName}</span>
+                  <span className="text-[13px] text-muted">{RECORD_LABEL[r.kind]}</span>
+                </span>
+                <span className="shrink-0 font-condensed text-lg tabular-nums text-brand">{recordValue(r)}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="space-y-2">
         <CardTitle>Exercícios</CardTitle>

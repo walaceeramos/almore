@@ -5,6 +5,8 @@ import { requireUser } from "@/core/auth/session";
 import { getExercise } from "@/features/exercises/queries";
 import { archiveCustomExercise } from "@/features/exercises/actions";
 import { PATTERN_LABEL, EQUIPMENT_LABEL, restLabel } from "@/features/exercises/labels";
+import { listRecords } from "@/features/sessions/queries";
+import { RECORD_LABEL, RECORD_ORDER, recordValue } from "@/features/sessions/labels";
 import { kg } from "@/core/utils/format";
 import { Card, CardTitle, EmptyState } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -18,9 +20,17 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 export default async function ExercicioPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
   const { id } = await params;
-  const e = await getExercise(id);
+  const [e, todosRecordes] = await Promise.all([getExercise(id), listRecords([id])]);
   if (!e) notFound();
 
+  const recordes = RECORD_ORDER.flatMap((k) => todosRecordes.filter((r) => r.kind === k));
+  // No fuso do usuário: o servidor roda em UTC e um treino às 22h viraria o dia seguinte.
+  const DATA = new Intl.DateTimeFormat("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone: user.profile?.timezone ?? "America/Sao_Paulo",
+  });
   const primarios = e.muscles.filter((m) => m.role === "primario");
   const secundarios = e.muscles.filter((m) => m.role === "secundario");
   const meu = e.ownerId === user.id;
@@ -71,11 +81,25 @@ export default async function ExercicioPage({ params }: { params: Promise<{ id: 
       </Card>
 
       <section className="space-y-3">
-        <CardTitle>Seu histórico</CardTitle>
-        <EmptyState
-          title="Nenhum registro ainda"
-          description="Histórico, recordes e evolução de carga aparecem aqui quando a execução de treinos existir."
-        />
+        <CardTitle>Seus recordes</CardTitle>
+        {recordes.length === 0 ? (
+          <EmptyState
+            title="Nenhum recorde ainda"
+            description="Os recordes aparecem aqui depois do primeiro treino concluído com este exercício. Gráficos de evolução chegam na fase 7."
+          />
+        ) : (
+          <Card className="divide-y divide-line p-0">
+            {recordes.map((r) => (
+              <div key={r.kind} className="flex items-baseline justify-between gap-3 px-4 py-3 text-sm">
+                <span className="text-muted">{RECORD_LABEL[r.kind]}</span>
+                <span className="text-right">
+                  <span className="block font-condensed text-base tabular-nums">{recordValue(r)}</span>
+                  <span className="text-xs text-faint">{DATA.format(r.achievedAt)}</span>
+                </span>
+              </div>
+            ))}
+          </Card>
+        )}
       </section>
 
       {meu && (

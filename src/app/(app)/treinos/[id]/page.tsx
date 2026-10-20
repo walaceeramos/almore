@@ -163,8 +163,8 @@ export default async function ProgramaPage({ params }: { params: Promise<{ id: s
 
       <Card className="border-dashed bg-transparent">
         <p className="text-[13px] text-faint">
-          O veredito antes de cada série — subir, manter ou reduzir a carga — usa a faixa de repetições e o
-          incremento definidos aqui. Ele entra na fase 5, junto com as regras de progressão.
+          O veredito antes de cada exercício — subir, manter ou reduzir a carga — usa a faixa de repetições, o RIR
+          alvo e o incremento definidos aqui.
         </p>
       </Card>
     </div>

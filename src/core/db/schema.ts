@@ -9,7 +9,7 @@
  * "Migrations" no AGENTS.md.
  *
  * Hoje cobre `profiles` (Fase 1), o catálogo de exercícios (Fase 2), os
- * programas (Fase 3) e a execução (Fase 4). As demais tabelas do
+ * programas (Fase 3), a execução (Fase 4) e os recordes (Fase 5). As demais tabelas do
  * planejamento entram nas fases seguintes.
  */
 import {
@@ -307,3 +307,44 @@ export const sets = pgTable(
 export type WorkoutSession = typeof workoutSessions.$inferSelect;
 export type SessionExercise = typeof sessionExercises.$inferSelect;
 export type WorkoutSet = typeof sets.$inferSelect;
+
+/* ------------------------------------------------------------------ *
+ * Fase 5 — recordes pessoais
+ *
+ * Derivado das séries, recalculado ao concluir a sessão. O único por
+ * (user_id, exercise_id, kind), os CHECK, as FKs, o RLS e o trigger
+ * moram só na migration 0007.
+ * ------------------------------------------------------------------ */
+
+export const recordKind = pgEnum("record_kind", [
+  "carga_maxima",
+  "melhor_serie",
+  "volume_serie",
+  "volume_sessao",
+]);
+
+export const personalRecords = pgTable(
+  "personal_records",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    exerciseId: uuid("exercise_id").notNull(),
+    kind: recordKind("kind").notNull(),
+    value: numeric("value", { precision: 10, scale: 2 }).notNull(),
+    /** Nulo só em volume_sessao. */
+    setId: uuid("set_id"),
+    sessionId: uuid("session_id").notNull(),
+    weightKg: numeric("weight_kg", { precision: 6, scale: 2 }).notNull(),
+    reps: integer("reps").notNull(),
+    achievedAt: timestamp("achieved_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("personal_records_exercise_idx").on(t.exerciseId),
+    index("personal_records_set_idx").on(t.setId),
+    index("personal_records_session_idx").on(t.sessionId),
+  ],
+);
+
+export type PersonalRecordRow = typeof personalRecords.$inferSelect;

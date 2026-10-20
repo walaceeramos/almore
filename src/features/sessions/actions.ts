@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/core/auth/server";
 import { requireUser } from "@/core/auth/session";
 import { resolveLoadStep } from "@/core/domain/load-step";
+import { recomputeRecords } from "./records";
 import {
   startSessionSchema,
   sessionIdSchema,
@@ -141,7 +142,7 @@ export async function startSession(_prev: SessionActionState, formData: FormData
 
 /** Exige pelo menos uma série: treino concluído sem nada feito é ruído no histórico. */
 export async function finishSession(_prev: SessionActionState, formData: FormData): Promise<SessionActionState> {
-  await requireUser();
+  const user = await requireUser();
   const parsed = finishSessionSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: parsed.error.flatten().fieldErrors };
 
@@ -169,7 +170,19 @@ export async function finishSession(_prev: SessionActionState, formData: FormDat
 
   if (error) return { error: "Não foi possível concluir o treino. Tente de novo." };
 
+  // Depois de concluir, para a consulta já enxergar esta sessão. Recorde é
+  // derivado: se falhar, o treino continua concluído.
+  const { data: exercicios } = await supabase
+    .from("session_exercises")
+    .select("exercise_id")
+    .eq("session_id", parsed.data.id);
+  await recomputeRecords(
+    user.id,
+    [...new Set(((exercicios ?? []) as { exercise_id: string }[]).map((e) => e.exercise_id))],
+  );
+
   revalidar((data as { routine_id: string | null } | null)?.routine_id);
+  revalidatePath("/exercicios", "layout");
   redirect(`/executar/${parsed.data.id}/resumo`);
 }
 

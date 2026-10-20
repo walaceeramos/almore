@@ -1,15 +1,16 @@
 import { notFound, redirect } from "next/navigation";
 import { requireUser } from "@/core/auth/session";
-import { getPreviousPerformance, getSession } from "@/features/sessions/queries";
+import { getRecentHistory, getSession, listRecords } from "@/features/sessions/queries";
 import { listExercises } from "@/features/exercises/queries";
 import { EQUIPMENT_LABEL, restLabel } from "@/features/exercises/labels";
 import { prescriptionLabel, rirLabel } from "@/features/routines/labels";
+import { suggestProgression } from "@/core/domain/progression";
+import { isStagnant } from "@/core/domain/stagnation";
+import type { SetRecordKind } from "@/core/domain/records";
 import type { PickableExercise } from "@/components/exercise-picker";
 import { Execucao, type ExercicioExec, type SerieExec } from "./execucao";
 
 export const metadata = { title: "Treino · Almore" };
-
-const DATA_CURTA = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit" });
 
 export default async function ExecutarPage({ params }: { params: Promise<{ sessaoId: string }> }) {
   const user = await requireUser();
@@ -21,26 +22,42 @@ export default async function ExecutarPage({ params }: { params: Promise<{ sessa
 
   // A página é camada de app: fala com as features e converte para a forma
   // que a tela consome. A tela não conhece nenhuma delas por dentro.
-  const [anteriores, catalogo] = await Promise.all([
-    getPreviousPerformance(
-      sessao.id,
-      sessao.exercises.map((e) => e.exerciseId),
-    ),
+  // No fuso do usuário: o servidor roda em UTC e um treino às 22h viraria o dia seguinte.
+  const DATA_CURTA = new Intl.DateTimeFormat("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: user.profile?.timezone ?? "America/Sao_Paulo",
+  });
+
+  const idsExercicio = sessao.exercises.map((e) => e.exerciseId);
+  const [historico, recordes, catalogo] = await Promise.all([
+    getRecentHistory(sessao.id, idsExercicio),
+    listRecords(idsExercicio),
     listExercises({}),
   ]);
 
   const exercicios: ExercicioExec[] = sessao.exercises.map((e) => {
-    const anterior = anteriores[e.exerciseId];
-    const { targetSets, repMin, repMax } = e;
+    const passadas = historico[e.exerciseId] ?? [];
+    const anterior = passadas[0];
+    const { targetSets, repMin, repMax, targetRir } = e;
+
+    // A regra roda aqui, no servidor, sobre o histórico sem a sessão atual.
+    const veredito = suggestProgression({ targetSets, repMin, repMax, targetRir }, e.loadStepKg, passadas);
+
+    const melhores: Partial<Record<SetRecordKind, number>> = {};
+    for (const r of recordes) {
+      if (r.exerciseId === e.exerciseId && r.kind !== "volume_sessao") melhores[r.kind] = r.value;
+    }
+
     return {
       id: e.id,
       exerciseId: e.exerciseId,
       name: e.exerciseName,
       isBodyweight: e.equipment === "peso_corporal",
       equipmentLabel: EQUIPMENT_LABEL[e.equipment] ?? e.equipment,
-      targetSets: e.targetSets,
-      repMin: e.repMin,
-      targetRir: e.targetRir,
+      targetSets,
+      repMin,
+      targetRir,
       restSeconds: e.restSeconds,
       loadStepKg: e.loadStepKg,
       notes: e.notes,
@@ -48,18 +65,17 @@ export default async function ExecutarPage({ params }: { params: Promise<{ sessa
         targetSets !== null && repMin !== null && repMax !== null
           ? prescriptionLabel(targetSets, repMin, repMax)
           : null,
-      rir: rirLabel(e.targetRir),
+      rir: rirLabel(targetRir),
       descanso: restLabel(e.restSeconds),
       anterior: anterior
         ? {
             data: DATA_CURTA.format(anterior.date),
-            series: anterior.sets.map((s) => ({
-              kind: s.kind,
-              weightKg: s.weightKg === null ? null : Number(s.weightKg),
-              reps: s.reps,
-            })),
+            series: anterior.sets.map((s) => ({ kind: s.kind, weightKg: s.weightKg, reps: s.reps })),
           }
         : null,
+      veredito,
+      estagnado: isStagnant(passadas.map((p) => p.sets)),
+      recordes: melhores,
     };
   });
 

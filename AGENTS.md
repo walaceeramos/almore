@@ -16,8 +16,8 @@ não existir, peça ao usuário antes de tomar decisões de arquitetura.
 
 Fases 1 a 4 concluídas. Fase 4 validada pelo usuário no banco real:
 treino iniciado, séries registradas com cronômetro, treino concluído.
-Fase 5 autorizada, em planejamento: nenhum código antes de o plano ser
-aprovado.
+Fase 5 implementada, aguardando validação contra o banco real (migration
+0007).
 
 | Fase | Estado | O que entrega |
 | --- | --- | --- |
@@ -25,7 +25,7 @@ aprovado.
 | 2 | pronta | Catálogo de exercícios, busca, filtros, exercício personalizado |
 | 3 | pronta | Criar, editar, duplicar e arquivar programas de treino |
 | 4 | pronta | Execução do treino: registrar série, cronômetro, concluir |
-| 5 | planejando | Regras de domínio: progressão, recordes, 1RM, volume, consistência |
+| 5 | validar | Regras de domínio: progressão, recordes, 1RM, volume, consistência |
 | 6 | — | Histórico de sessões, com edição retroativa |
 | 7 | — | Gráficos de carga, volume e recordes |
 | 8 | — | Metas, peso e medidas |
@@ -40,8 +40,8 @@ aprovado.
 2. **Uma fase por vez.** Não avance para a próxima automaticamente.
 3. **Decisão que afeta todo o projeto exige confirmação antes.** Troca de
    biblioteca, mudança de schema existente, mudança de padrão de autenticação.
-4. **Ao terminar uma fase**, rode `npm run typecheck`, `npx eslint .` e
-   `npm run build`, e relate: o que foi feito, arquivos criados ou alterados,
+4. **Ao terminar uma fase**, rode `npm run typecheck`, `npx eslint .`,
+   `npm test` e `npm run build`, e relate: o que foi feito, arquivos criados ou alterados,
    o que funciona, pendências e como testar.
 
 ## Invariantes de arquitetura
@@ -108,6 +108,7 @@ npm run dev         # desenvolvimento
 npm run build       # build de produção
 npm run typecheck   # checagem de tipos
 npx eslint .        # lint
+npm test            # testes de unidade de core/domain (Vitest, tests/unit)
 python3 scripts/gerar_seed.py   # regera o seed de exercícios
 ```
 
@@ -121,6 +122,7 @@ Rode no SQL Editor do Supabase, nesta ordem:
 4. `supabase/migrations/0004_touch_updated_at_search_path.sql`
 5. `supabase/migrations/0005_routines.sql`
 6. `supabase/migrations/0006_sessions.sql`
+7. `supabase/migrations/0007_personal_records.sql`
 
 Migrations novas seguem a numeração. Nunca edite uma migration já aplicada:
 crie a próxima.
@@ -157,6 +159,32 @@ Registradas para não se perderem; nenhuma tem fase atribuída ainda.
   ("80.00") funciona. Afeta o "sobe X kg" do detalhe do programa quando o
   incremento é 10. A Fase 4 contorna com `toFixed(2)`. Corrigir a função
   espera autorização (regra 1).
+
+## Fase 5 — escopo entregue
+
+Regras puras em `src/core/domain` (`progression`, `records`, `volume`,
+`consistency`, `stagnation`), com testes em `tests/unit`. Toda regra nova
+de domínio entra com teste. Tabela `personal_records` (migration 0007).
+Decisões aprovadas pelo usuário:
+
+- Vitest como dependência de desenvolvimento.
+- A primeira série de cada exercício vem pré-preenchida pela sugestão de
+  progressão (antes vinha da última vez). Da segunda em diante, repete a
+  última série de trabalho da sessão.
+- Recordes são derivados: recalculados do zero, por exercício, ao concluir
+  a sessão (`features/sessions/records.ts`). Durante o treino, a marca de
+  recorde é calculada na tela contra os recordes anteriores.
+- Série sem RIR anotado conta como dentro do RIR alvo.
+- Peso corporal sem carga adicional: progressão só por repetições, fora dos
+  recordes. Com carga adicional, conta a carga adicional.
+- Semana começa na segunda. A semana atual só entra na sequência quando
+  bate a meta, e não a quebra enquanto não acabou.
+- Estagnação compara cada sessão com a imediatamente anterior, não com o
+  recorde: quem volta de uma redução de carga está evoluindo.
+
+Sessões concluídas antes da 0007 não têm recorde gravado. O recorde de um
+exercício aparece no próximo treino concluído com ele, já recalculado
+sobre todo o histórico.
 
 ## Fase 4 — escopo entregue
 

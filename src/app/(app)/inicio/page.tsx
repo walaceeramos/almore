@@ -1,14 +1,24 @@
 import { Play } from "lucide-react";
 import { requireUser } from "@/core/auth/session";
 import { getActiveRoutine } from "@/features/routines/queries";
-import { getLastTrainedDayId, getOpenSession, listFinishedSince } from "@/features/sessions/queries";
+import {
+  getLastTrainedDayId,
+  getOpenSession,
+  listFinishedSetsSince,
+  listFinishedSince,
+} from "@/features/sessions/queries";
 import { StartSessionForm } from "@/features/sessions/components/start-session-form";
 import { nextDayId } from "@/core/domain/next-day";
-import { localDate, localWeekStart } from "@/core/utils/date";
+import { adherence, weekStartOf, weekStreak } from "@/core/domain/consistency";
+import { setsPerMuscle } from "@/core/domain/volume";
+import { localDate } from "@/core/utils/date";
 import { Card, CardTitle, EmptyState } from "@/components/ui/card";
 import { ButtonLink } from "@/components/ui/button";
 
 export const metadata = { title: "Início · Almore" };
+
+const PERCENTUAL = new Intl.NumberFormat("pt-BR", { style: "percent", maximumFractionDigits: 0 });
+const NUMERO = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 });
 
 const FOCO: Record<string, string> = {
   hipertrofia: "Ganho de massa",
@@ -38,15 +48,45 @@ export default async function InicioPage() {
     }).format(agora),
   );
 
-  // Oito dias para trás cobrem a semana inteira em qualquer fuso; o recorte
-  // exato, a partir de segunda-feira no fuso do usuário, é feito aqui.
-  const [aberta, programa, concluidas] = await Promise.all([
+  // Um ano de datas de conclusão alimenta a sequência; oito dias de séries
+  // cobrem a semana atual em qualquer fuso. O recorte exato, a partir de
+  // segunda-feira no fuso do usuário, é feito aqui.
+  const DIA = 86_400_000;
+  const [aberta, programa, concluidas, semanaDeSeries] = await Promise.all([
     getOpenSession(),
     getActiveRoutine(),
-    listFinishedSince(new Date(agora.getTime() - 8 * 86_400_000)),
+    listFinishedSince(new Date(agora.getTime() - 53 * 7 * DIA)),
+    listFinishedSetsSince(new Date(agora.getTime() - 8 * DIA)),
   ]);
-  const segunda = localWeekStart(agora, fuso);
-  const naSemana = concluidas.filter((d) => localDate(d, fuso) >= segunda).length;
+
+  const meta = profile?.weeklyTarget ?? 0;
+  const hoje = localDate(agora, fuso);
+  const segunda = weekStartOf(hoje);
+  const datas = concluidas.map((d) => localDate(d, fuso));
+  const naSemana = datas.filter((d) => d >= segunda).length;
+  const sequencia = weekStreak(datas, meta, hoje);
+  const aderencia = adherence(datas, meta, hoje);
+
+  const seriesDaSemana = semanaDeSeries.sets.filter((s) => localDate(s.finishedAt, fuso) >= segunda);
+  const trabalhoNaSemana = seriesDaSemana.filter((s) => s.kind === "trabalho").length;
+  const nomesMusculo = new Map(
+    Object.values(semanaDeSeries.muscles)
+      .flat()
+      .map((m) => [m.id, m.name]),
+  );
+  const porMusculo = Object.entries(
+    setsPerMuscle(
+      seriesDaSemana.map((s) => ({
+        kind: s.kind,
+        muscles: (semanaDeSeries.muscles[s.exerciseId] ?? []).map((m) => ({
+          muscleId: m.id,
+          contribution: m.contribution,
+        })),
+      })),
+    ),
+  )
+    .map(([id, series]) => ({ nome: nomesMusculo.get(id) ?? id, series }))
+    .sort((a, b) => b.series - a.series || a.nome.localeCompare(b.nome));
 
   const proximoId =
     programa && !aberta
@@ -74,21 +114,44 @@ export default async function InicioPage() {
           <p className="text-xs text-faint">Esta semana</p>
           <p className="font-condensed text-3xl font-bold tabular-nums">
             {naSemana}
-            <span className="text-lg text-muted">/{profile?.weeklyTarget ?? 0}</span>
+            <span className="text-lg text-muted">/{meta}</span>
           </p>
           <p className="text-xs text-muted">treinos concluídos</p>
         </Card>
         <Card>
           <p className="text-xs text-faint">Sequência</p>
-          <p className="font-condensed text-3xl font-bold tabular-nums">0</p>
-          <p className="text-xs text-muted">semanas na meta</p>
+          <p className="font-condensed text-3xl font-bold tabular-nums">{sequencia}</p>
+          <p className="text-xs text-muted">
+            {sequencia === 1 ? "semana na meta" : "semanas na meta"} · aderência{" "}
+            {PERCENTUAL.format(aderencia)} em 4 semanas
+          </p>
         </Card>
         <Card>
           <p className="text-xs text-faint">Volume da semana</p>
-          <p className="font-condensed text-3xl font-bold tabular-nums">0</p>
+          <p className="font-condensed text-3xl font-bold tabular-nums">{trabalhoNaSemana}</p>
           <p className="text-xs text-muted">séries de trabalho</p>
         </Card>
       </section>
+
+      {porMusculo.length > 0 && (
+        <section className="space-y-2">
+          <CardTitle>Séries por grupo nesta semana</CardTitle>
+          <Card className="space-y-1.5">
+            <ul className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-3">
+              {porMusculo.map((m) => (
+                <li key={m.nome} className="flex items-baseline justify-between gap-2">
+                  <span className="truncate text-muted">{m.nome}</span>
+                  <span className="font-condensed text-base tabular-nums">{NUMERO.format(m.series)}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="border-t border-line pt-2 text-xs text-faint">
+              Músculo primário conta 1 série; secundário, 0,5. É uma convenção para comparar semanas, não uma medida
+              fisiológica.
+            </p>
+          </Card>
+        </section>
+      )}
 
       <section className="space-y-3">
         <CardTitle>Treino de hoje</CardTitle>
@@ -127,10 +190,6 @@ export default async function InicioPage() {
           />
         )}
       </section>
-
-      <p className="text-xs text-faint">
-        Sequência e volume da semana ficam zerados até as regras de consistência e volume chegarem, na fase 5.
-      </p>
     </div>
   );
 }

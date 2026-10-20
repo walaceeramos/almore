@@ -54,10 +54,30 @@ export type OpenSession = {
   startedAt: Date;
 };
 
-/** O que foi feito na última sessão concluída com aquele exercício. */
-export type PreviousPerformance = {
+/**
+ * Uma sessão concluída com aquele exercício: a prescrição que valia nela e
+ * as séries. É a entrada da progressão e da estagnação.
+ */
+export type PastExerciseSession = {
   date: Date;
-  sets: { setNumber: number; kind: SetKind; weightKg: string | null; reps: number }[];
+  targetSets: number | null;
+  repMin: number | null;
+  repMax: number | null;
+  targetRir: number | null;
+  sets: { setNumber: number; kind: SetKind; weightKg: number | null; reps: number; rir: number | null }[];
+};
+
+export type RecordKind = "carga_maxima" | "melhor_serie" | "volume_serie" | "volume_sessao";
+
+export type PersonalRecordView = {
+  exerciseId: string;
+  exerciseName: string;
+  kind: RecordKind;
+  value: number;
+  weightKg: number;
+  reps: number;
+  sessionId: string;
+  achievedAt: Date;
 };
 
 /* ------------------------------------------------------------------ *
@@ -242,50 +262,191 @@ export async function listFinishedSince(since: Date): Promise<Date[]> {
   return (data as { finished_at: string }[]).map((r) => new Date(r.finished_at));
 }
 
-type PreviousRow = {
+type HistoryRow = {
   exercise_id: string;
-  sets: { set_number: number; kind: SetKind; weight_kg: string | null; reps: number }[] | null;
+  target_sets: number | null;
+  rep_min: number | null;
+  rep_max: number | null;
+  target_rir: number | null;
+  sets: { set_number: number; kind: SetKind; weight_kg: string | null; reps: number; rir: number | null }[] | null;
   workout_sessions: { started_at: string } | null;
 };
 
+/** Quantas sessões por exercício: a estagnação precisa de quatro. */
+const HISTORY_PER_EXERCISE = 4;
+
 /**
- * Para cada exercício, as séries da última sessão concluída em que ele
- * apareceu com alguma série feita. É o que pré-preenche a série seguinte.
+ * Para cada exercício, as últimas sessões concluídas em que ele teve
+ * alguma série, da mais recente para a mais antiga. Alimenta a "última
+ * vez", a progressão e a estagnação.
  *
- * Uma consulta só, ordenada da mais recente para a mais antiga, em vez de
- * uma por exercício. O teto de linhas cobre com folga as últimas dezenas
- * de sessões, que é onde a última vez de qualquer exercício em uso está.
+ * Uma consulta só, em vez de uma por exercício. O teto de linhas cobre com
+ * folga as últimas dezenas de sessões, que é onde as quatro mais recentes
+ * de qualquer exercício em uso estão.
  */
-export async function getPreviousPerformance(
+export async function getRecentHistory(
   sessionId: string,
   exerciseIds: string[],
-): Promise<Record<string, PreviousPerformance>> {
+): Promise<Record<string, PastExerciseSession[]>> {
   if (exerciseIds.length === 0) return {};
   const supabase = await createClient();
 
   const { data, error } = await supabase
     .from("session_exercises")
-    .select("exercise_id, sets ( set_number, kind, weight_kg, reps ), workout_sessions!inner ( started_at, status )")
+    .select(
+      `exercise_id, target_sets, rep_min, rep_max, target_rir,
+       sets ( set_number, kind, weight_kg, reps, rir ),
+       workout_sessions!inner ( started_at, status )`,
+    )
     .in("exercise_id", exerciseIds)
     .neq("session_id", sessionId)
     .eq("workout_sessions.status", "concluida")
     .order("created_at", { ascending: false })
-    .limit(300);
+    .limit(400);
 
   if (error || !data) return {};
 
-  const resultado: Record<string, PreviousPerformance> = {};
-  for (const row of data as unknown as PreviousRow[]) {
-    if (resultado[row.exercise_id]) continue;
+  const resultado: Record<string, PastExerciseSession[]> = {};
+  for (const row of data as unknown as HistoryRow[]) {
+    const lista = (resultado[row.exercise_id] ??= []);
+    if (lista.length >= HISTORY_PER_EXERCISE) continue;
     const series = row.sets ?? [];
     if (series.length === 0 || !row.workout_sessions) continue;
 
-    resultado[row.exercise_id] = {
+    lista.push({
       date: new Date(row.workout_sessions.started_at),
+      targetSets: row.target_sets,
+      repMin: row.rep_min,
+      repMax: row.rep_max,
+      targetRir: row.target_rir,
       sets: series
-        .map((s) => ({ setNumber: s.set_number, kind: s.kind, weightKg: s.weight_kg, reps: s.reps }))
+        .map((s) => ({
+          setNumber: s.set_number,
+          kind: s.kind,
+          weightKg: s.weight_kg === null ? null : Number(s.weight_kg),
+          reps: s.reps,
+          rir: s.rir,
+        }))
         .sort((a, b) => a.setNumber - b.setNumber),
-    };
+    });
   }
   return resultado;
+}
+
+/* ------------------------------------------------------------------ *
+ * Recordes
+ * ------------------------------------------------------------------ */
+
+type RecordRow = {
+  exercise_id: string;
+  kind: RecordKind;
+  value: string;
+  weight_kg: string;
+  reps: number;
+  session_id: string;
+  achieved_at: string;
+  exercises: { name: string } | null;
+};
+
+const RECORD_SELECT = "exercise_id, kind, value, weight_kg, reps, session_id, achieved_at, exercises ( name )";
+
+function toRecord(row: RecordRow): PersonalRecordView {
+  return {
+    exerciseId: row.exercise_id,
+    exerciseName: row.exercises?.name ?? "",
+    kind: row.kind,
+    value: Number(row.value),
+    weightKg: Number(row.weight_kg),
+    reps: row.reps,
+    sessionId: row.session_id,
+    achievedAt: new Date(row.achieved_at),
+  };
+}
+
+/** Recordes atuais dos exercícios informados. Vazio para quem nunca treinou. */
+export async function listRecords(exerciseIds: string[]): Promise<PersonalRecordView[]> {
+  if (exerciseIds.length === 0) return [];
+  const supabase = await createClient();
+
+  const { data, error } = await supabase.from("personal_records").select(RECORD_SELECT).in("exercise_id", exerciseIds);
+  if (error || !data) return [];
+  return (data as unknown as RecordRow[]).map(toRecord);
+}
+
+/** Recordes que ainda pertencem a esta sessão: os que ela bateu e ninguém superou. */
+export async function listSessionRecords(sessionId: string): Promise<PersonalRecordView[]> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase.from("personal_records").select(RECORD_SELECT).eq("session_id", sessionId);
+  if (error || !data) return [];
+  return (data as unknown as RecordRow[]).map(toRecord);
+}
+
+/* ------------------------------------------------------------------ *
+ * Volume da semana
+ * ------------------------------------------------------------------ */
+
+export type FinishedSetEntry = {
+  finishedAt: Date;
+  exerciseId: string;
+  kind: SetKind;
+};
+
+export type MuscleInfo = { id: string; name: string; contribution: number };
+
+type VolumeRow = {
+  finished_at: string;
+  session_exercises: { exercise_id: string; sets: { kind: SetKind }[] | null }[] | null;
+};
+
+type MuscleRow = {
+  exercise_id: string;
+  contribution: string;
+  muscles: { id: string; name: string } | null;
+};
+
+/**
+ * Séries das sessões concluídas a partir de um instante, mais os músculos
+ * de cada exercício envolvido. O recorte exato da semana, no fuso do
+ * usuário, e a soma por músculo ficam com quem chama.
+ */
+export async function listFinishedSetsSince(
+  since: Date,
+): Promise<{ sets: FinishedSetEntry[]; muscles: Record<string, MuscleInfo[]> }> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("workout_sessions")
+    .select("finished_at, session_exercises ( exercise_id, sets ( kind ) )")
+    .eq("status", "concluida")
+    .gte("finished_at", since.toISOString());
+
+  if (error || !data) return { sets: [], muscles: {} };
+
+  const sets: FinishedSetEntry[] = [];
+  for (const s of data as unknown as VolumeRow[]) {
+    const finishedAt = new Date(s.finished_at);
+    for (const e of s.session_exercises ?? []) {
+      for (const set of e.sets ?? []) sets.push({ finishedAt, exerciseId: e.exercise_id, kind: set.kind });
+    }
+  }
+
+  const ids = [...new Set(sets.map((s) => s.exerciseId))];
+  if (ids.length === 0) return { sets, muscles: {} };
+
+  const { data: vinculos } = await supabase
+    .from("exercise_muscles")
+    .select("exercise_id, contribution, muscles ( id, name )")
+    .in("exercise_id", ids);
+
+  const muscles: Record<string, MuscleInfo[]> = {};
+  for (const v of (vinculos ?? []) as unknown as MuscleRow[]) {
+    if (!v.muscles) continue;
+    (muscles[v.exercise_id] ??= []).push({
+      id: v.muscles.id,
+      name: v.muscles.name,
+      contribution: Number(v.contribution),
+    });
+  }
+  return { sets, muscles };
 }
