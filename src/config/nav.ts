@@ -12,7 +12,7 @@ export type NavItem = {
 export const primaryNav: NavItem[] = [
   { href: "/inicio", label: "Início", icon: Home },
   { href: "/treinos", label: "Treinos", icon: Dumbbell },
-  { href: "/historico", label: "Histórico", icon: History, soon: true },
+  { href: "/historico", label: "Histórico", icon: History },
   { href: "/progresso", label: "Progresso", icon: TrendingUp, soon: true },
 ];
 

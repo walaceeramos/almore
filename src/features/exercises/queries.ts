@@ -1,120 +1,68 @@
-import { createClient } from "@/core/auth/server";
+import { allExercises, findExercise, muscleName, type AnyExercise } from "@/core/data/exercises";
 import type { ExerciseFilters } from "./schemas";
+
+export { listMuscles } from "@/core/data/exercises";
 
 export type ExerciseListItem = {
   id: string;
   name: string;
-  slug: string | null;
-  ownerId: string | null;
+  /** Verdadeiro para exercício criado pelo usuário. */
+  isCustom: boolean;
   pattern: string;
   equipment: string;
   isUnilateral: boolean;
   defaultRestSeconds: number;
-  loadStepKg: string;
+  loadStepKg: number;
   cue: string | null;
+  archivedAt: string | null;
   muscles: { id: string; name: string; role: string }[];
 };
 
-type Row = {
-  id: string;
-  name: string;
-  slug: string | null;
-  owner_id: string | null;
-  pattern: string;
-  equipment: string;
-  is_unilateral: boolean;
-  default_rest_seconds: number;
-  load_step_kg: string;
-  cue: string | null;
-  exercise_muscles: { role: string; muscles: { id: string; name: string } | null }[] | null;
-};
-
-const SELECT = `
-  id, name, slug, owner_id, pattern, equipment, is_unilateral,
-  default_rest_seconds, load_step_kg, cue,
-  exercise_muscles ( role, muscles ( id, name ) )
-`;
-
-function toItem(row: Row): ExerciseListItem {
-  const muscles = (row.exercise_muscles ?? [])
-    .filter((m) => m.muscles)
-    .map((m) => ({ id: m.muscles!.id, name: m.muscles!.name, role: m.role }))
-    .sort((a, b) => (a.role === b.role ? 0 : a.role === "primario" ? -1 : 1));
-
+function toItem(e: AnyExercise): ExerciseListItem {
   return {
-    id: row.id,
-    name: row.name,
-    slug: row.slug,
-    ownerId: row.owner_id,
-    pattern: row.pattern,
-    equipment: row.equipment,
-    isUnilateral: row.is_unilateral,
-    defaultRestSeconds: row.default_rest_seconds,
-    loadStepKg: row.load_step_kg,
-    cue: row.cue,
-    muscles,
+    id: e.id,
+    name: e.name,
+    isCustom: e.isCustom,
+    pattern: e.pattern,
+    equipment: e.equipment,
+    isUnilateral: e.isUnilateral,
+    defaultRestSeconds: e.defaultRestSeconds,
+    loadStepKg: e.loadStepKg,
+    cue: e.cue,
+    archivedAt: e.archivedAt,
+    muscles: e.muscles
+      .map((m) => ({ id: m.muscleId, name: muscleName(m.muscleId), role: m.role }))
+      .sort((a, b) => (a.role === b.role ? 0 : a.role === "primario" ? -1 : 1)),
   };
 }
 
+/** Busca sem acento e sem caixa: "triceps" acha "Tríceps". */
+function normalizar(s: string): string {
+  return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+}
+
+/**
+ * Catálogo mais os próprios, sem os arquivados. Filtrar em memória é o
+ * caminho certo aqui: são algumas centenas de itens já no aparelho, e a
+ * resposta vem a cada tecla sem ida à rede.
+ */
 export async function listExercises(filters: ExerciseFilters): Promise<ExerciseListItem[]> {
-  const supabase = await createClient();
+  const termo = filters.busca ? normalizar(filters.busca.trim()) : "";
 
-  /*
-   * O filtro por grupo muscular vai ao banco antes do `limit`. Antes ele
-   * era aplicado em memória depois da consulta, então o teto de 300 linhas
-   * cortava candidatos que o filtro ainda iria aceitar — resultado
-   * incompleto, e silencioso, assim que o catálogo crescesse.
-   *
-   * São duas etapas porque a junção aninhada do PostgREST, filtrada, só
-   * devolveria o vínculo que casou e descartaria os demais da mesma linha,
-   * e a lista precisa de todos para mostrar primário e secundários.
-   */
-  let idsDoMusculo: string[] | null = null;
-  if (filters.musculo) {
-    const { data, error } = await supabase
-      .from("exercise_muscles")
-      .select("exercise_id")
-      .eq("muscle_id", filters.musculo);
-    if (error) throw new Error(`Falha ao filtrar por grupo muscular: ${error.message}`);
-
-    idsDoMusculo = (data ?? []).map((r) => (r as { exercise_id: string }).exercise_id);
-    if (idsDoMusculo.length === 0) return [];
-  }
-
-  // O RLS já limita a catálogo global + próprios. Aqui é só refino.
-  let query = supabase.from("exercises").select(SELECT).is("archived_at", null);
-
-  if (idsDoMusculo) query = query.in("id", idsDoMusculo);
-
-  if (filters.busca) {
-    // Escapa o coringa do PostgREST para a busca não virar padrão arbitrário.
-    const termo = filters.busca.replace(/[%_,]/g, " ").trim();
-    if (termo) query = query.ilike("name", `%${termo}%`);
-  }
-  if (filters.equipamento) query = query.eq("equipment", filters.equipamento);
-  if (filters.padrao) query = query.eq("pattern", filters.padrao);
-  if (filters.origem === "catalogo") query = query.is("owner_id", null);
-  if (filters.origem === "meus") query = query.not("owner_id", "is", null);
-
-  const { data, error } = await query.order("name").limit(300);
-  if (error) throw new Error(`Falha ao listar exercícios: ${error.message}`);
-
-  return (data as unknown as Row[]).map(toItem);
+  return (await allExercises())
+    .filter((e) => e.archivedAt === null)
+    .filter((e) => !termo || normalizar(e.name).includes(termo))
+    .filter((e) => !filters.musculo || e.muscles.some((m) => m.muscleId === filters.musculo))
+    .filter((e) => !filters.equipamento || e.equipment === filters.equipamento)
+    .filter((e) => !filters.padrao || e.pattern === filters.padrao)
+    .filter((e) => filters.origem !== "catalogo" || !e.isCustom)
+    .filter((e) => filters.origem !== "meus" || e.isCustom)
+    .map(toItem)
+    .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
 }
 
+/** Inclui arquivados: o histórico aponta para eles. */
 export async function getExercise(id: string): Promise<ExerciseListItem | null> {
-  const supabase = await createClient();
-  const { data, error } = await supabase.from("exercises").select(SELECT).eq("id", id).maybeSingle();
-  if (error || !data) return null;
-  return toItem(data as unknown as Row);
-}
-
-export async function listMuscles() {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("muscles")
-    .select("id, name, region, sort_order")
-    .order("sort_order");
-  if (error) throw new Error(`Falha ao carregar grupos musculares: ${error.message}`);
-  return (data ?? []) as { id: string; name: string; region: string; sort_order: number }[];
+  const e = await findExercise(id);
+  return e ? toItem(e) : null;
 }

@@ -12,17 +12,35 @@ de uso governa quase todas as decisões técnicas.
 O planejamento técnico completo está em `docs/PLANEJAMENTO.md`. Se o arquivo
 não existir, peça ao usuário antes de tomar decisões de arquitetura.
 
+## Modo atual: dados no aparelho, sem banco e sem login
+
+O usuário está decidindo se vai usar o Supabase. Enquanto isso, o app roda
+**sem servidor de dados**: tudo fica no navegador do aparelho (IndexedDB,
+via Dexie), com um único usuário local e sem login. Decisão do usuário,
+com estes termos aprovados:
+
+- Dados no aparelho, em `src/core/data/db.ts`. O app funciona sem internet.
+- Sem login. O perfil (`profile`, id `"eu"`) substitui a conta; sem perfil
+  concluído, `ProfileGate` manda para `/boas-vindas`.
+- O código com Supabase está guardado no git: commit `0d400de`, tag
+  `supabase-fase6`. As migrations continuam em `supabase/`, para referência
+  e para a volta. Supabase, Drizzle e `postgres` saíram do `package.json`.
+- Backup em arquivo (Ajustes → Exportar/Importar), porque o aparelho é a
+  única cópia. O app pede ao navegador armazenamento persistente.
+
+Quando o banco for decidido, ele entra como segunda implementação de
+`core/data` ou como sincronização (Fase 9), sem reescrever telas nem regras.
+
 ## Estado atual
 
-Fases 1 a 4 concluídas. Fase 4 validada pelo usuário no banco real:
-treino iniciado, séries registradas com cronômetro, treino concluído.
-Fase 5 implementada, aguardando validação contra o banco real (migration
-0007). Fase 6 implementada, aguardando validação (migrations 0007 e
-0008).
+Fases 1 a 6 entregues e convertidas para dados no aparelho. A conversão
+passou em typecheck, lint, testes e build, e todas as rotas respondem;
+falta o usuário validar no navegador (criar perfil, programa, treino,
+histórico e backup).
 
 | Fase | Estado | O que entrega |
 | --- | --- | --- |
-| 1 | pronta | Fundação, banco, autenticação, perfil, layout, navegação, dashboard |
+| 1 | pronta | Fundação, perfil, layout, navegação, dashboard (login suspenso) |
 | 2 | pronta | Catálogo de exercícios, busca, filtros, exercício personalizado |
 | 3 | pronta | Criar, editar, duplicar e arquivar programas de treino |
 | 4 | pronta | Execução do treino: registrar série, cronômetro, concluir |
@@ -40,67 +58,61 @@ Fase 5 implementada, aguardando validação contra o banco real (migration
    e espere resposta.
 2. **Uma fase por vez.** Não avance para a próxima automaticamente.
 3. **Decisão que afeta todo o projeto exige confirmação antes.** Troca de
-   biblioteca, mudança de schema existente, mudança de padrão de autenticação.
+   biblioteca, mudança no formato dos dados guardados, volta do login ou
+   escolha de banco.
 4. **Ao terminar uma fase**, rode `npm run typecheck`, `npx eslint .`,
-   `npm test` e `npm run build`, e relate: o que foi feito, arquivos criados ou alterados,
-   o que funciona, pendências e como testar.
+   `npm test` e `npm run build`, e relate: o que foi feito, arquivos criados
+   ou alterados, o que funciona, pendências e como testar.
 
 ## Invariantes de arquitetura
 
-- **`src/core/domain` é puro.** Não importa de `features`, de `app` nem de
-  biblioteca de UI. São funções testáveis isoladamente.
-- **Uma feature não importa de outra feature.** Código comum sobe para `core`.
-- **Drizzle serve APENAS para tipos TypeScript derivados do schema.** A
-  fonte de verdade do banco são as migrations SQL escritas à mão em
-  `supabase/migrations`, aplicadas manualmente no SQL Editor do Supabase.
-  `schema.ts` precisa espelhar o SQL, mas nunca o gera nem o aplica.
-- **O runtime lê via supabase-js.** O cliente Supabase carrega o JWT do
-  usuário, que é o que faz o Row Level Security valer. Conexão direta por
-  Drizzle usaria papel de serviço e passaria por cima do RLS.
-- **Chave estrangeira apontando para `exercises` usa ON DELETE RESTRICT.**
-  Vale para `routine_exercises`, `session_exercises` e qualquer outra que
-  venha depois. A exclusão lógica por `archived_at` é a regra de produto;
-  o RESTRICT é a trava no banco. Existe uma política de DELETE em
-  `exercises` porque o rollback de `createCustomExercise` precisa remover
-  um exercício órfão quando o vínculo muscular falha. Com RESTRICT, esse
-  DELETE só funciona no caso órfão: o banco recusa apagar qualquer
-  exercício já referenciado por histórico ou prescrição.
-- **Resultado de consulta vem em snake_case; converta na borda.** O Postgres
-  devolve `display_name`, o tipo do Drizzle é `displayName`. Toda query
-  escreve um tipo de linha crua e uma função de conversão, como em
-  `core/auth/session.ts` e `features/exercises/queries.ts`. Nunca castar o
-  retorno direto para o tipo do Drizzle: o cast compila e devolve
-  `undefined` em todo campo.
-- **RLS ligado em toda tabela nova, sem exceção.** Política padrão nega tudo.
-  Isso é redundante de propósito com o filtro da aplicação.
-- **`getUser`, nunca `getSession`.** `getSession` confia no cookie sem validar
-  o token no servidor.
-- **Zod valida toda Server Action** antes de tocar o banco.
-- **Peso em `numeric`, nunca em ponto flutuante.** Anilhas de 1,25 kg acumulam
-  erro em `float`.
-- **Exclusão lógica (`archived_at`) em exercícios e programas.** Apagar de
-  verdade quebraria o histórico que aponta para eles.
+- **`src/core/domain` é puro.** Não importa de `features`, de `app`, de
+  `core/data` nem de biblioteca de UI. São funções testáveis isoladamente.
+- **Uma feature não importa de outra feature.** Código comum sobe para
+  `core` — por isso exercícios vistos de qualquer lugar moram em
+  `core/data/exercises.ts`.
+- **O banco do aparelho só existe no navegador.** Quem lê ou grava é
+  componente cliente. Páginas (`page.tsx`) ficam como Server Components
+  finos, só com `metadata`, e renderizam uma `view.tsx` cliente que lê com
+  `useLiveQuery` — a tela se atualiza sozinha quando a tabela muda, sem
+  `revalidatePath`. Página no servidor não importa `core/data/db`.
+- **As travas que o Postgres dava viraram código.** Cascade, SET NULL,
+  RESTRICT, unicidade (uma rotina ativa, uma sessão em andamento) e CHECK
+  estão em `features/*/actions.ts`, sempre dentro de `db.transaction`, que
+  aqui é atômica. Toda escrita em mais de uma tabela vai em transação.
+- **Zod valida toda ação** antes de gravar.
+- **Ação que navega devolve `redirectTo`**; a tela navega com
+  `useRedirectOnSuccess`. Não chame `redirect()` dentro de ação.
+- **Peso com duas casas.** Peso é número em JavaScript, mas todo valor
+  gravado passa por `toKg` (centésimos), e as somas do domínio são feitas em
+  centésimos inteiros. Anilhas de 1,25 kg acumulam erro em float.
+- **Exclusão lógica (`archivedAt`) em exercícios personalizados e
+  programas.** Apagar de verdade quebraria o histórico que aponta para eles.
 - **Prescrição e execução são coisas distintas.** Um treino é plano; uma sessão
-  é o que aconteceu. `session_exercises` guarda snapshot da prescrição vigente,
+  é o que aconteceu. `sessionExercises` guarda snapshot da prescrição vigente,
   senão editar o programa reescreveria o passado.
-- **Execução aponta para o plano com ON DELETE SET NULL.** `workout_sessions`
-  → `routines`/`routine_days` e `session_exercises` → `routine_exercises`.
-  O editor apaga dias e prescrições de verdade; RESTRICT faria isso falhar
-  depois do primeiro treino. A sessão não perde nada, porque o snapshot está
-  nela. Para `exercises` continua RESTRICT.
-- **Id da série é gerado no cliente** (`core/utils/uuid.ts`) e gravado por
-  `upsert`. Repetir o registro cai na mesma linha. Não troque por id do
-  servidor: a fila offline da Fase 9 depende disso.
+- **Execução aponta para o plano com "SET NULL".** Apagar um dia ou uma
+  prescrição zera `routineDayId`/`routineExerciseId` nas sessões, sem
+  apagá-las (`removeDay`, `removeExercise`).
+- **Id da série é gerado no cliente** (`core/utils/uuid.ts`) e gravado com
+  `put`. Repetir o registro cai na mesma linha. A fila de sincronização da
+  Fase 9 depende disso.
+- **Exercício do catálogo tem o slug como id.** O catálogo vem dentro do app
+  (`core/data/catalog.ts`, gerado por `scripts/gerar_seed.py`); o histórico
+  aponta para o slug, então slug publicado não muda.
+- **Mudar o formato dos dados = nova versão no Dexie** (`db.version(n+1)`),
+  descrevendo só o que mudou, e `BACKUP_VERSION` acompanha. Nunca altere uma
+  versão já publicada — é o equivalente a editar migration aplicada.
 
 ## Convenções
 
 - Rotas, textos de interface e mensagens de erro em português do Brasil.
-- Nomes de tabelas e colunas em inglês, `snake_case`.
+- Campos guardados em inglês, camelCase; a forma de cada tabela está em
+  `core/data/types.ts`.
 - Nomes de arquivos e variáveis em inglês; componentes de página podem usar
   português quando a rota é em português (`filtros.tsx` em `/exercicios`).
 - Alvo de toque mínimo de 44 px. Campo de texto com `text-[16px]` para o iOS
   não dar zoom ao focar.
-- Mensagens de erro do Supabase são traduzidas antes de chegar ao usuário.
 
 ## Comandos
 
@@ -110,70 +122,38 @@ npm run build       # build de produção
 npm run typecheck   # checagem de tipos
 npx eslint .        # lint
 npm test            # testes de unidade de core/domain (Vitest, tests/unit)
-python3 scripts/gerar_seed.py   # regera o seed de exercícios
+python scripts/gerar_seed.py   # regera o catálogo (TS) e o seed SQL guardado
 ```
 
-## Banco
+O app não precisa de `.env.local` neste modo.
 
-Rode no SQL Editor do Supabase, nesta ordem:
+## Banco guardado (Supabase)
 
-1. `supabase/migrations/0001_profiles.sql`
-2. `supabase/migrations/0002_exercises.sql`
-3. `supabase/seed/0003_exercises_seed.sql`
-4. `supabase/migrations/0004_touch_updated_at_search_path.sql`
-5. `supabase/migrations/0005_routines.sql`
-6. `supabase/migrations/0006_sessions.sql`
-7. `supabase/migrations/0007_personal_records.sql`
-8. `supabase/migrations/0008_delete_finished_sessions.sql`
-
-Migrations novas seguem a numeração. Nunca edite uma migration já aplicada:
-crie a próxima.
-
-### Migrations: o SQL manda
-
-Drizzle serve APENAS para tipos TypeScript derivados do schema. A fonte de
-verdade do banco são as migrations SQL escritas à mão em
-`supabase/migrations`, aplicadas manualmente no SQL Editor do Supabase.
-`schema.ts` precisa espelhar o SQL, mas nunca o gera nem o aplica.
-
-Por isso o projeto **não tem** `drizzle.config.ts` nem os scripts
-`db:generate` e `db:push`. Foram removidos de propósito: o `out` do config
-apontava para `supabase/migrations`, a mesma pasta das migrations escritas
-à mão, e dois donos para a mesma pasta é bug esperando acontecer. Não
-recrie nenhum dos dois.
-
-O que mora no SQL e o `schema.ts` não declara: chaves estrangeiras,
-todos os CHECK, índices parciais e funcionais, constraints como
-`exercises_slug_scope`, políticas de RLS e triggers.
-
-Ao criar uma tabela: escreva a migration SQL primeiro, aplique no SQL
-Editor, depois espelhe as colunas no `schema.ts` — nunca o contrário.
+Não está em uso. As migrations em `supabase/migrations` descrevem o modelo
+equivalente e ficam para a volta ao banco. Ordem, se um dia forem
+aplicadas: 0001, 0002, seed 0003, 0004, 0005, 0006, 0007, 0008. No banco
+real só foram aplicadas até a 0006.
 
 ## Pendências conhecidas
 
-Registradas para não se perderem; nenhuma tem fase atribuída ainda.
-
-- **Lentidão percebida na área de treinos.** Investigada na Fase 6, por
-  leitura de código (sem medição). Causas prováveis, aguardando
-  autorização para corrigir: nenhuma rota tem `loading.tsx`, então o toque
-  não dá retorno até o servidor responder; `getCurrentUser` roda duas vezes
-  por página (layout e página), cada uma com `auth.getUser` (ida à rede) e
-  leitura de `profiles`, além do `getUser` do middleware; `generateMetadata`
-  repete `getRoutine` em `/treinos/[id]` e no editor; o editor recarrega o
-  catálogo inteiro a cada navegação.
+- **Lentidão percebida na área de treinos.** As causas apontadas na Fase 6
+  eram idas ao servidor (login repetido por página, consultas duplicadas,
+  nenhuma tela de carregamento). Com os dados no aparelho, essas idas
+  deixaram de existir e as telas mostram carregamento. Falta o usuário
+  confirmar se a sensação de lentidão sumiu.
 - **Animação de status do treino.** A ajustar.
 - **`kg()` em `core/utils/format.ts` corta zero de número inteiro.**
-  `kg(80)` devolve "8" e `kg(10)` devolve "1"; com string do `numeric`
-  ("80.00") funciona. Afeta o "sobe X kg" do detalhe do programa quando o
-  incremento é 10. A Fase 4 contorna com `toFixed(2)`. Corrigir a função
-  espera autorização (regra 1).
+  `kg(80)` devolve "8"; com string ("80.00") funciona. As telas passam
+  `n.toFixed(2)`. Corrigir a função espera autorização (regra 1).
+- **Sem teste automático da camada de dados.** As regras de domínio têm
+  testes; as ações em `features/*/actions.ts` não, porque testar IndexedDB
+  em Node exige `fake-indexeddb` (biblioteca nova, regra 3).
 
 ## Fase 6 — escopo entregue
 
 `/historico` (calendário do mês, lista por dia, filtro por programa) e
 `/historico/[sessaoId]` (correção de série, exercício, data, horário,
-esforço, observação; exclusão do treino). Migration 0008 libera excluir
-treino concluído. Decisões aprovadas pelo usuário:
+esforço, observação; exclusão do treino). Decisões aprovadas pelo usuário:
 
 - Excluir treino concluído, em dois toques, recalculando os recordes.
 - Data e horário editáveis, digitados no fuso do usuário
@@ -192,16 +172,16 @@ execução e histórico.
 
 Regras puras em `src/core/domain` (`progression`, `records`, `volume`,
 `consistency`, `stagnation`), com testes em `tests/unit`. Toda regra nova
-de domínio entra com teste. Tabela `personal_records` (migration 0007).
-Decisões aprovadas pelo usuário:
+de domínio entra com teste. Tabela `personalRecords`. Decisões aprovadas
+pelo usuário:
 
 - Vitest como dependência de desenvolvimento.
 - A primeira série de cada exercício vem pré-preenchida pela sugestão de
-  progressão (antes vinha da última vez). Da segunda em diante, repete a
-  última série de trabalho da sessão.
+  progressão. Da segunda em diante, repete a última série de trabalho da
+  sessão.
 - Recordes são derivados: recalculados do zero, por exercício, ao concluir
-  a sessão (`features/sessions/records.ts`). Durante o treino, a marca de
-  recorde é calculada na tela contra os recordes anteriores.
+  a sessão e a cada correção (`features/sessions/records.ts`). Durante o
+  treino, a marca de recorde é calculada na tela.
 - Série sem RIR anotado conta como dentro do RIR alvo.
 - Peso corporal sem carga adicional: progressão só por repetições, fora dos
   recordes. Com carga adicional, conta a carga adicional.
@@ -210,24 +190,17 @@ Decisões aprovadas pelo usuário:
 - Estagnação compara cada sessão com a imediatamente anterior, não com o
   recorde: quem volta de uma redução de carga está evoluindo.
 
-Sessões concluídas antes da 0007 não têm recorde gravado. O recorde de um
-exercício aparece no próximo treino concluído com ele, já recalculado
-sobre todo o histórico.
-
 ## Fase 4 — escopo entregue
 
-Tabelas `workout_sessions`, `session_exercises` e `sets`, com RLS
-(migration 0006). Execução online, sem TanStack Query nem Dexie — entram
-na Fase 9. Decisões aprovadas pelo usuário:
+Tabelas `sessions`, `sessionExercises` e `sets`. Decisões aprovadas pelo
+usuário:
 
 - Sessão começa sempre de um dia de programa; exercício fora do plano pode
   ser acrescentado durante o treino (entra sem prescrição, alvos nulos).
-- Uma sessão em andamento por usuário (índice único parcial).
-- Pré-preenchimento: última série de trabalho da sessão, senão a da última
-  vez, senão fundo da faixa com carga zerada. Sugestão de progressão é Fase 5.
-- `weight_kg` nulo = só o peso do corpo; preenchido em exercício de peso
+- Uma sessão em andamento por vez.
+- `weightKg` nulo = só o peso do corpo; preenchido em exercício de peso
   corporal = carga adicional.
-- Descartar apaga de verdade, só em andamento (o RLS de DELETE garante).
+- Descartar apaga de verdade, só em andamento.
 - Superset ignorado: exercícios em sequência.
 - Aviso do descanso com tela bloqueada fica para a Fase 9 (service worker).
   O término é guardado como instante, então o tempo está certo ao desbloquear.
@@ -238,9 +211,9 @@ programa e no card "Treino de hoje" do início.
 
 ## Fase 3 — escopo entregue
 
-Tabelas `routines`, `routine_days` e `routine_exercises`, com RLS. Telas de
-lista, detalhe e editor de programa. O editor precisa permitir montar dias,
-adicionar exercícios do catálogo, e definir por exercício: séries, faixa de
+Tabelas `routines`, `routineDays` e `routineExercises`. Telas de lista,
+detalhe e editor de programa. O editor permite montar dias, adicionar
+exercícios do catálogo, e definir por exercício: séries, faixa de
 repetições, RIR alvo, descanso e ordem.
 
 Critério de verificação: montar um programa de 5 dias do zero, sem erro.

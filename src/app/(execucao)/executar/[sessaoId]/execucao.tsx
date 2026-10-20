@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   Check,
@@ -594,6 +595,7 @@ function ListaExercicios({
 
 /** Descarte em dois toques: apaga a sessão inteira e não tem volta. */
 function DescartarTreino({ sessionId, onDescartar }: { sessionId: string; onDescartar: () => void }) {
+  const router = useRouter();
   const [confirmando, setConfirmando] = useState(false);
 
   if (!confirmando) {
@@ -605,7 +607,14 @@ function DescartarTreino({ sessionId, onDescartar }: { sessionId: string; onDesc
   }
 
   return (
-    <form action={discardSession} onSubmit={onDescartar} className="space-y-2">
+    <form
+      action={async (fd) => {
+        await discardSession(fd);
+        onDescartar();
+        router.push("/inicio");
+      }}
+      className="space-y-2"
+    >
       <input type="hidden" name="id" value={sessionId} />
       <p className="text-center text-[13px] text-bad">
         Apaga o treino e todas as séries registradas. Não dá para desfazer.

@@ -3,11 +3,16 @@
 import { useActionState } from "react";
 import { createRoutine } from "@/features/routines/actions";
 import type { RoutineActionState } from "@/features/routines/schemas";
+import { useProfile } from "@/components/profile-gate";
+import { useRedirectOnSuccess } from "@/components/use-redirect";
 import { Field, SelectField } from "@/components/ui/field";
 import { SubmitButton } from "@/components/ui/submit-button";
 
-export function NovoProgramaForm({ defaultDayCount }: { defaultDayCount: number }) {
+export function NovoProgramaForm() {
   const [state, action] = useActionState<RoutineActionState, FormData>(createRoutine, {});
+  useRedirectOnSuccess(state.redirectTo);
+  // A meta semanal do perfil é o palpite mais informado para quantos dias o programa deve ter.
+  const defaultDayCount = Math.min(7, Math.max(1, useProfile().weeklyTarget));
 
   return (
     <form action={action} className="space-y-4" noValidate>

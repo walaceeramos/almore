@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Gera supabase/seed/0003_exercises_seed.sql a partir da tabela compacta abaixo.
+"""Gera o catálogo de exercícios a partir da tabela compacta abaixo:
+
+- src/core/data/catalog.ts, usado pelo app com os dados no aparelho;
+- supabase/seed/0003_exercises_seed.sql, guardado para quando houver banco.
 
 Formato de cada linha:
   slug | nome | padrão | equipamento | primários | secundários | descanso | passo | unilateral | dica
@@ -215,10 +218,56 @@ def main():
     destino = pathlib.Path("supabase/seed/0003_exercises_seed.sql")
     destino.parent.mkdir(parents=True, exist_ok=True)
     destino.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+    ts = gerar_ts(dados)
     print("exercícios: %d" % len(dados))
     print("vínculos musculares: %d" % len(linhas_mus))
     print("músculos: %d" % len(MUSCLES))
-    print("arquivo: %s" % destino)
+    print("arquivos: %s, %s" % (destino, ts))
+
+
+def ts_str(v):
+    """String TypeScript entre aspas duplas, com escape."""
+    return '"%s"' % v.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def gerar_ts(dados):
+    """Catálogo dentro do app, para os dados no aparelho.
+
+    O id do exercício global é o próprio slug: estável entre versões do
+    catálogo, e o histórico guardado no aparelho aponta para ele.
+    """
+    out = []
+    out.append("/* Gerado por scripts/gerar_seed.py. Não edite à mão: edite o RAW do script. */")
+    out.append('import type { CatalogExercise, Muscle } from "./types";')
+    out.append("")
+    out.append("export const MUSCLES: Muscle[] = [")
+    for m in MUSCLES:
+        out.append("  { id: %s, name: %s, region: %s, sortOrder: %d }," % (ts_str(m[0]), ts_str(m[1]), ts_str(m[2]), m[3]))
+    out.append("];")
+    out.append("")
+    out.append("export const CATALOG: CatalogExercise[] = [")
+    for slug, nome, padrao, equip, prim, sec, rest, passo, uni, dica in dados:
+        musculos = ["{ muscleId: %s, role: \"primario\" }" % ts_str(m) for m in prim.split(",") if m]
+        musculos += ["{ muscleId: %s, role: \"secundario\" }" % ts_str(m) for m in sec.split(",") if m]
+        out.append("  {")
+        out.append("    id: %s," % ts_str(slug))
+        out.append("    name: %s," % ts_str(nome))
+        out.append("    pattern: %s," % ts_str(padrao))
+        out.append("    equipment: %s," % ts_str(equip))
+        out.append("    isUnilateral: %s," % ("true" if uni == "1" else "false"))
+        out.append("    defaultRestSeconds: %s," % rest)
+        out.append("    loadStepKg: %s," % passo)
+        out.append("    cue: %s," % (ts_str(dica) if dica else "null"))
+        out.append("    muscles: [%s]," % ", ".join(musculos))
+        out.append("  },")
+    out.append("];")
+    out.append("")
+
+    destino = pathlib.Path("src/core/data/catalog.ts")
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    destino.write_text("\n".join(out), encoding="utf-8")
+    return destino
 
 if __name__ == "__main__":
     main()

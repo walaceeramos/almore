@@ -4,6 +4,7 @@ import { useActionState } from "react";
 import { Play } from "lucide-react";
 import { startSession } from "../actions";
 import type { SessionActionState } from "../schemas";
+import { useRedirectOnSuccess } from "@/components/use-redirect";
 import { SelectField } from "@/components/ui/field";
 import { SubmitButton } from "@/components/ui/submit-button";
 
@@ -22,6 +23,7 @@ type Props = {
  */
 export function StartSessionForm({ days, defaultDayId, label = "Iniciar treino" }: Props) {
   const [state, action] = useActionState<SessionActionState, FormData>(startSession, {});
+  useRedirectOnSuccess(state.redirectTo);
 
   return (
     <form action={action} className="space-y-3">

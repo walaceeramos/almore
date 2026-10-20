@@ -4,6 +4,7 @@ import { useActionState, useState } from "react";
 import { createCustomExercise } from "@/features/exercises/actions";
 import type { ExerciseActionState } from "@/features/exercises/schemas";
 import { PATTERN_LABEL, EQUIPMENT_LABEL } from "@/features/exercises/labels";
+import { useRedirectOnSuccess } from "@/components/use-redirect";
 import { Field, SelectField } from "@/components/ui/field";
 import { SubmitButton } from "@/components/ui/submit-button";
 
@@ -11,6 +12,7 @@ type Muscle = { id: string; name: string; region: string };
 
 export function NovoExercicioForm({ muscles }: { muscles: Muscle[] }) {
   const [state, action] = useActionState<ExerciseActionState, FormData>(createCustomExercise, {});
+  useRedirectOnSuccess(state.redirectTo);
   const [primario, setPrimario] = useState(muscles[0]?.id ?? "");
 
   return (

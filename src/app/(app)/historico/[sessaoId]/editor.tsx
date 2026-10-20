@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useRedirectOnSuccess } from "@/components/use-redirect";
 import { Check, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import {
   addSessionExercise,
@@ -411,7 +411,6 @@ export function EditorHistorico({
   exercicios: ExercicioHist[];
   catalogo: PickableExercise[];
 }) {
-  const router = useRouter();
   // As séries vivem aqui depois da primeira carga, como na execução. Os
   // exercícios vêm das props: acrescentar ou remover um revalida a página.
   const [series, setSeries] = useState<Record<string, SerieHist[]>>(() =>
@@ -421,6 +420,7 @@ export function EditorHistorico({
   const [seletorAberto, setSeletorAberto] = useState(false);
   const [, startTransition] = useTransition();
   const [estadoExclusao, excluir] = useActionState<SessionActionState, FormData>(deleteSession, {});
+  useRedirectOnSuccess(estadoExclusao.redirectTo);
 
   function mudar(exId: string, id: string, mudanca: Partial<SerieHist> | null) {
     setSeries((prev) => {
@@ -446,9 +446,9 @@ export function EditorHistorico({
         ...(nova ? { completedAt: finishedAt } : {}),
       }),
     );
+    // Os recordes do topo da página se atualizam sozinhos: a tela lê o
+    // aparelho por consulta viva, que refaz quando a tabela muda.
     mudar(exId, s.id, { estado: r.error ? "erro" : undefined });
-    // Os recordes do topo da página são do servidor e acabaram de mudar.
-    if (!r.error) router.refresh();
   }
 
   function salvar(exId: string, s: SerieHist) {
@@ -474,8 +474,6 @@ export function EditorHistorico({
     if (r.error) {
       setSeries((prev) => ({ ...prev, [exId]: antes }));
       setErro(r.error);
-    } else {
-      router.refresh();
     }
   }
 

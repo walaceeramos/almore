@@ -1,17 +1,19 @@
 "use client";
 
 import { useActionState } from "react";
-import { completeOnboarding } from "@/features/auth/actions";
-import type { ActionState } from "@/features/auth/schemas";
+import { completeOnboarding } from "@/features/profile/actions";
+import type { ProfileActionState } from "@/features/profile/schemas";
+import { useRedirectOnSuccess } from "@/components/use-redirect";
 import { Field, SelectField } from "@/components/ui/field";
 import { SubmitButton } from "@/components/ui/submit-button";
 
-export function OnboardingForm({ defaultName }: { defaultName: string }) {
-  const [state, action] = useActionState<ActionState, FormData>(completeOnboarding, {});
+export function OnboardingForm() {
+  const [state, action] = useActionState<ProfileActionState, FormData>(completeOnboarding, {});
+  useRedirectOnSuccess(state.redirectTo);
 
   return (
     <form action={action} className="space-y-4" noValidate>
-      <Field label="Nome" name="displayName" defaultValue={defaultName} required errors={state.fieldErrors?.displayName} />
+      <Field label="Nome" name="displayName" required errors={state.fieldErrors?.displayName} />
 
       <div className="grid grid-cols-2 gap-3">
         <Field

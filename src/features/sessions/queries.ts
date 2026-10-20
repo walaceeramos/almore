@@ -1,4 +1,6 @@
-import { createClient } from "@/core/auth/server";
+import { db } from "@/core/data/db";
+import { exerciseMap } from "@/core/data/exercises";
+import type { SessionExercise, WorkoutSession, WorkoutSet } from "@/core/data/types";
 
 /* ------------------------------------------------------------------ *
  * Formas que as telas consomem
@@ -6,13 +8,14 @@ import { createClient } from "@/core/auth/server";
 
 export type SetKind = "aquecimento" | "trabalho";
 export type SessionStatus = "em_andamento" | "concluida";
+export type RecordKind = "carga_maxima" | "melhor_serie" | "volume_serie" | "volume_sessao";
 
 export type SessionSet = {
   id: string;
   setNumber: number;
   kind: SetKind;
-  /** Como veio do banco ("82.50"); nulo = só o peso do corpo. */
-  weightKg: string | null;
+  /** Nulo = só o peso do corpo. */
+  weightKg: number | null;
   reps: number;
   rir: number | null;
   completedAt: Date;
@@ -48,16 +51,9 @@ export type SessionDetail = {
   exercises: SessionExerciseDetail[];
 };
 
-export type OpenSession = {
-  id: string;
-  title: string;
-  startedAt: Date;
-};
+export type OpenSession = { id: string; title: string; startedAt: Date };
 
-/**
- * Uma sessão concluída com aquele exercício: a prescrição que valia nela e
- * as séries. É a entrada da progressão e da estagnação.
- */
+/** Uma sessão concluída com aquele exercício: a prescrição que valia nela e as séries. */
 export type PastExerciseSession = {
   date: Date;
   targetSets: number | null;
@@ -66,8 +62,6 @@ export type PastExerciseSession = {
   targetRir: number | null;
   sets: { setNumber: number; kind: SetKind; weightKg: number | null; reps: number; rir: number | null }[];
 };
-
-export type RecordKind = "carga_maxima" | "melhor_serie" | "volume_serie" | "volume_sessao";
 
 export type PersonalRecordView = {
   exerciseId: string;
@@ -81,196 +75,120 @@ export type PersonalRecordView = {
 };
 
 /* ------------------------------------------------------------------ *
- * Linhas cruas
- *
- * O Postgres devolve snake_case e o tipo do Drizzle é camelCase. A
- * conversão é explícita na borda, como manda o invariante.
+ * Auxiliares
  * ------------------------------------------------------------------ */
 
-type SetRow = {
-  id: string;
-  set_number: number;
-  kind: SetKind;
-  weight_kg: string | null;
-  reps: number;
-  rir: number | null;
-  completed_at: string;
-};
-
-type SessionExerciseRow = {
-  id: string;
-  position: number;
-  target_sets: number | null;
-  rep_min: number | null;
-  rep_max: number | null;
-  target_rir: number | null;
-  rest_seconds: number;
-  load_step_kg: string;
-  notes: string | null;
-  exercises: { id: string; name: string; equipment: string } | null;
-  sets: SetRow[] | null;
-};
-
-type SessionRow = {
-  id: string;
-  title_snapshot: string;
-  status: SessionStatus;
-  routine_id: string | null;
-  routine_day_id: string | null;
-  started_at: string;
-  finished_at: string | null;
-  perceived_effort: number | null;
-  notes: string | null;
-  session_exercises: SessionExerciseRow[] | null;
-};
-
-const DETAIL_SELECT = `
-  id, title_snapshot, status, routine_id, routine_day_id, started_at,
-  finished_at, perceived_effort, notes,
-  session_exercises (
-    id, position, target_sets, rep_min, rep_max, target_rir, rest_seconds,
-    load_step_kg, notes,
-    exercises ( id, name, equipment ),
-    sets ( id, set_number, kind, weight_kg, reps, rir, completed_at )
-  )
-`;
-
-/** Desempata por id porque `position` e `set_number` não são únicos. */
+/** Desempata por id porque `position` e `setNumber` não são únicos. */
 function byPosition<T extends { position: number; id: string }>(a: T, b: T): number {
   return a.position - b.position || a.id.localeCompare(b.id);
 }
 
-function bySetNumber(a: SessionSet, b: SessionSet): number {
-  return a.setNumber - b.setNumber || a.completedAt.getTime() - b.completedAt.getTime();
+function bySetNumber(a: WorkoutSet, b: WorkoutSet): number {
+  return a.setNumber - b.setNumber || a.completedAt.localeCompare(b.completedAt);
 }
 
-function toSet(row: SetRow): SessionSet {
+function toSet(s: WorkoutSet): SessionSet {
   return {
-    id: row.id,
-    setNumber: row.set_number,
-    kind: row.kind,
-    weightKg: row.weight_kg,
-    reps: row.reps,
-    rir: row.rir,
-    completedAt: new Date(row.completed_at),
+    id: s.id,
+    setNumber: s.setNumber,
+    kind: s.kind,
+    weightKg: s.weightKg,
+    reps: s.reps,
+    rir: s.rir,
+    completedAt: new Date(s.completedAt),
   };
 }
 
-function toSessionExercise(row: SessionExerciseRow): SessionExerciseDetail | null {
-  // O RLS de session_exercises exige exercício legível; isto não deveria
-  // acontecer, mas sem o exercício não há o que mostrar.
-  if (!row.exercises) return null;
-
-  return {
-    id: row.id,
-    position: row.position,
-    exerciseId: row.exercises.id,
-    exerciseName: row.exercises.name,
-    equipment: row.exercises.equipment,
-    targetSets: row.target_sets,
-    repMin: row.rep_min,
-    repMax: row.rep_max,
-    targetRir: row.target_rir,
-    restSeconds: row.rest_seconds,
-    loadStepKg: Number(row.load_step_kg),
-    notes: row.notes,
-    sets: (row.sets ?? []).map(toSet).sort(bySetNumber),
-  };
+/** Séries agrupadas pelo exercício da sessão, já em ordem. */
+async function setsBySessionExercise(ids: string[]): Promise<Map<string, WorkoutSet[]>> {
+  const series = ids.length ? await db.sets.where("sessionExerciseId").anyOf(ids).toArray() : [];
+  const mapa = new Map<string, WorkoutSet[]>();
+  for (const s of series) mapa.set(s.sessionExerciseId, [...(mapa.get(s.sessionExerciseId) ?? []), s]);
+  for (const lista of mapa.values()) lista.sort(bySetNumber);
+  return mapa;
 }
 
-function toDetail(row: SessionRow): SessionDetail {
+async function finishedSessions(): Promise<WorkoutSession[]> {
+  return db.sessions.where("status").equals("concluida").toArray();
+}
+
+/* ------------------------------------------------------------------ *
+ * Sessão
+ * ------------------------------------------------------------------ */
+
+/** Sessão inteira, com exercícios e séries. Serve a execução, o resumo e o histórico. */
+export async function getSession(id: string): Promise<SessionDetail | null> {
+  const s = await db.sessions.get(id);
+  if (!s) return null;
+
+  const exerciciosDaSessao = await db.sessionExercises.where("sessionId").equals(id).toArray();
+  const [series, exercicios] = await Promise.all([
+    setsBySessionExercise(exerciciosDaSessao.map((e) => e.id)),
+    exerciseMap(),
+  ]);
+
   return {
-    id: row.id,
-    title: row.title_snapshot,
-    status: row.status,
-    routineId: row.routine_id,
-    routineDayId: row.routine_day_id,
-    startedAt: new Date(row.started_at),
-    finishedAt: row.finished_at ? new Date(row.finished_at) : null,
-    perceivedEffort: row.perceived_effort,
-    notes: row.notes,
-    exercises: (row.session_exercises ?? [])
-      .map(toSessionExercise)
-      .filter((e): e is SessionExerciseDetail => e !== null)
+    id: s.id,
+    title: s.titleSnapshot,
+    status: s.status,
+    routineId: s.routineId,
+    routineDayId: s.routineDayId,
+    startedAt: new Date(s.startedAt),
+    finishedAt: s.finishedAt ? new Date(s.finishedAt) : null,
+    perceivedEffort: s.perceivedEffort,
+    notes: s.notes,
+    exercises: exerciciosDaSessao
+      .flatMap((e) => {
+        const ex = exercicios.get(e.exerciseId);
+        if (!ex) return [];
+        return [
+          {
+            id: e.id,
+            position: e.position,
+            exerciseId: e.exerciseId,
+            exerciseName: ex.name,
+            equipment: ex.equipment,
+            targetSets: e.targetSets,
+            repMin: e.repMin,
+            repMax: e.repMax,
+            targetRir: e.targetRir,
+            restSeconds: e.restSeconds,
+            loadStepKg: e.loadStepKg,
+            notes: e.notes,
+            sets: (series.get(e.id) ?? []).map(toSet),
+          },
+        ];
+      })
       .sort(byPosition),
   };
 }
 
-/* ------------------------------------------------------------------ *
- * Consultas
- *
- * O RLS limita às sessões do próprio usuário; não há filtro de dono aqui.
- * ------------------------------------------------------------------ */
-
-/** Sessão inteira, com exercícios e séries. Serve a execução e o resumo. */
-export async function getSession(id: string): Promise<SessionDetail | null> {
-  const supabase = await createClient();
-
-  const { data, error } = await supabase.from("workout_sessions").select(DETAIL_SELECT).eq("id", id).maybeSingle();
-  if (error || !data) return null;
-
-  return toDetail(data as unknown as SessionRow);
-}
-
-/** A sessão em andamento, se houver. O índice parcial garante no máximo uma. */
+/** A sessão em andamento, se houver. A camada de dados garante no máximo uma. */
 export async function getOpenSession(): Promise<OpenSession | null> {
-  const supabase = await createClient();
-
-  const { data, error } = await supabase
-    .from("workout_sessions")
-    .select("id, title_snapshot, started_at")
-    .eq("status", "em_andamento")
-    .maybeSingle();
-
-  if (error || !data) return null;
-
-  const row = data as { id: string; title_snapshot: string; started_at: string };
-  return { id: row.id, title: row.title_snapshot, startedAt: new Date(row.started_at) };
+  const s = await db.sessions.where("status").equals("em_andamento").first();
+  return s ? { id: s.id, title: s.titleSnapshot, startedAt: new Date(s.startedAt) } : null;
 }
 
-/**
- * O dia do programa treinado por último, para propor o seguinte da
- * sequência. Nulo quando o programa nunca foi treinado.
- */
+/** O dia treinado por último naquele programa, para propor o seguinte. */
 export async function getLastTrainedDayId(routineId: string): Promise<string | null> {
-  const supabase = await createClient();
-
-  const { data } = await supabase
-    .from("workout_sessions")
-    .select("routine_day_id")
-    .eq("routine_id", routineId)
-    .eq("status", "concluida")
-    .not("routine_day_id", "is", null)
-    .order("started_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  return (data as { routine_day_id: string | null } | null)?.routine_day_id ?? null;
+  const sessoes = await db.sessions.where("routineId").equals(routineId).toArray();
+  const ultima = sessoes
+    .filter((s) => s.status === "concluida" && s.routineDayId !== null)
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
+  return ultima?.routineDayId ?? null;
 }
 
-/** Datas de conclusão a partir de um instante. Serve a contagem da semana. */
+/** Datas de conclusão a partir de um instante. Serve a semana e a sequência. */
 export async function listFinishedSince(since: Date): Promise<Date[]> {
-  const supabase = await createClient();
-
-  const { data, error } = await supabase
-    .from("workout_sessions")
-    .select("finished_at")
-    .eq("status", "concluida")
-    .gte("finished_at", since.toISOString());
-
-  if (error || !data) return [];
-  return (data as { finished_at: string }[]).map((r) => new Date(r.finished_at));
+  const limite = since.toISOString();
+  return (await finishedSessions())
+    .filter((s) => s.finishedAt !== null && s.finishedAt >= limite)
+    .map((s) => new Date(s.finishedAt as string));
 }
 
-type HistoryRow = {
-  exercise_id: string;
-  target_sets: number | null;
-  rep_min: number | null;
-  rep_max: number | null;
-  target_rir: number | null;
-  sets: { set_number: number; kind: SetKind; weight_kg: string | null; reps: number; rir: number | null }[] | null;
-  workout_sessions: { started_at: string } | null;
-};
+/* ------------------------------------------------------------------ *
+ * Histórico por exercício
+ * ------------------------------------------------------------------ */
 
 /** Quantas sessões por exercício: a estagnação precisa de quatro. */
 const HISTORY_PER_EXERCISE = 4;
@@ -279,62 +197,52 @@ const HISTORY_PER_EXERCISE = 4;
  * Para cada exercício, as últimas sessões concluídas em que ele teve
  * alguma série, da mais recente para a mais antiga. Alimenta a "última
  * vez", a progressão e a estagnação.
- *
- * Uma consulta só, em vez de uma por exercício. O teto de linhas cobre com
- * folga as últimas dezenas de sessões, que é onde as quatro mais recentes
- * de qualquer exercício em uso estão.
  */
 export async function getRecentHistory(
   sessionId: string,
   exerciseIds: string[],
 ): Promise<Record<string, PastExerciseSession[]>> {
   if (exerciseIds.length === 0) return {};
-  const supabase = await createClient();
 
-  const { data, error } = await supabase
-    .from("session_exercises")
-    .select(
-      `exercise_id, target_sets, rep_min, rep_max, target_rir,
-       sets ( set_number, kind, weight_kg, reps, rir ),
-       workout_sessions!inner ( started_at, status )`,
-    )
-    .in("exercise_id", exerciseIds)
-    .neq("session_id", sessionId)
-    .eq("workout_sessions.status", "concluida")
-    .order("created_at", { ascending: false })
-    .limit(400);
-
-  if (error || !data) return {};
+  const [linhas, sessoes] = await Promise.all([
+    db.sessionExercises.where("exerciseId").anyOf(exerciseIds).toArray(),
+    finishedSessions(),
+  ]);
+  const concluidas = new Map(sessoes.filter((s) => s.id !== sessionId).map((s) => [s.id, s]));
+  const validas = linhas.filter((l) => concluidas.has(l.sessionId));
+  const series = await setsBySessionExercise(validas.map((l) => l.id));
 
   const resultado: Record<string, PastExerciseSession[]> = {};
-  for (const row of data as unknown as HistoryRow[]) {
-    const lista = (resultado[row.exercise_id] ??= []);
+  const ordenadas = validas.sort((a, b) =>
+    (concluidas.get(b.sessionId)?.startedAt ?? "").localeCompare(concluidas.get(a.sessionId)?.startedAt ?? ""),
+  );
+  for (const l of ordenadas) {
+    const lista = (resultado[l.exerciseId] ??= []);
     if (lista.length >= HISTORY_PER_EXERCISE) continue;
-    const series = row.sets ?? [];
-    if (series.length === 0 || !row.workout_sessions) continue;
+    const doExercicio = series.get(l.id) ?? [];
+    const sessao = concluidas.get(l.sessionId);
+    if (doExercicio.length === 0 || !sessao) continue;
 
     lista.push({
-      date: new Date(row.workout_sessions.started_at),
-      targetSets: row.target_sets,
-      repMin: row.rep_min,
-      repMax: row.rep_max,
-      targetRir: row.target_rir,
-      sets: series
-        .map((s) => ({
-          setNumber: s.set_number,
-          kind: s.kind,
-          weightKg: s.weight_kg === null ? null : Number(s.weight_kg),
-          reps: s.reps,
-          rir: s.rir,
-        }))
-        .sort((a, b) => a.setNumber - b.setNumber),
+      date: new Date(sessao.startedAt),
+      targetSets: l.targetSets,
+      repMin: l.repMin,
+      repMax: l.repMax,
+      targetRir: l.targetRir,
+      sets: doExercicio.map((s) => ({
+        setNumber: s.setNumber,
+        kind: s.kind,
+        weightKg: s.weightKg,
+        reps: s.reps,
+        rir: s.rir,
+      })),
     });
   }
   return resultado;
 }
 
 /* ------------------------------------------------------------------ *
- * Histórico
+ * Histórico de sessões
  * ------------------------------------------------------------------ */
 
 export type HistoryItem = {
@@ -344,55 +252,39 @@ export type HistoryItem = {
   startedAt: Date;
   finishedAt: Date;
   exerciseCount: number;
-  sets: { kind: SetKind; weightKg: string | null; reps: number }[];
+  sets: { kind: SetKind; weightKg: number | null; reps: number }[];
 };
 
-type HistoryListRow = {
-  id: string;
-  title_snapshot: string;
-  routine_id: string | null;
-  started_at: string;
-  finished_at: string;
-  session_exercises: { sets: { kind: SetKind; weight_kg: string | null; reps: number }[] | null }[] | null;
-};
+/** Treinos concluídos que começaram no intervalo, do mais recente para o mais antigo. */
+export async function listFinishedBetween(from: Date, to: Date, routineId?: string): Promise<HistoryItem[]> {
+  const de = from.toISOString();
+  const ate = to.toISOString();
+  const sessoes = (await finishedSessions())
+    .filter((s) => s.startedAt >= de && s.startedAt < ate && (!routineId || s.routineId === routineId))
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  if (sessoes.length === 0) return [];
 
-/**
- * Treinos concluídos que começaram no intervalo, do mais recente para o
- * mais antigo. O intervalo chega com folga de um dia de cada lado; o
- * recorte exato do mês, no fuso do usuário, fica com a página.
- */
-export async function listFinishedBetween(
-  from: Date,
-  to: Date,
-  routineId?: string,
-): Promise<HistoryItem[]> {
-  const supabase = await createClient();
+  const exercicios = await db.sessionExercises
+    .where("sessionId")
+    .anyOf(sessoes.map((s) => s.id))
+    .toArray();
+  const series = await setsBySessionExercise(exercicios.map((e) => e.id));
 
-  let consulta = supabase
-    .from("workout_sessions")
-    .select("id, title_snapshot, routine_id, started_at, finished_at, session_exercises ( sets ( kind, weight_kg, reps ) )")
-    .eq("status", "concluida")
-    .gte("started_at", from.toISOString())
-    .lt("started_at", to.toISOString())
-    .order("started_at", { ascending: false });
+  const porSessao = new Map<string, SessionExercise[]>();
+  for (const e of exercicios) porSessao.set(e.sessionId, [...(porSessao.get(e.sessionId) ?? []), e]);
 
-  if (routineId) consulta = consulta.eq("routine_id", routineId);
-
-  const { data, error } = await consulta;
-  if (error || !data) return [];
-
-  return (data as unknown as HistoryListRow[]).map((r) => {
-    const exercicios = r.session_exercises ?? [];
+  return sessoes.map((s) => {
+    const doTreino = porSessao.get(s.id) ?? [];
     return {
-      id: r.id,
-      title: r.title_snapshot,
-      routineId: r.routine_id,
-      startedAt: new Date(r.started_at),
-      finishedAt: new Date(r.finished_at),
+      id: s.id,
+      title: s.titleSnapshot,
+      routineId: s.routineId,
+      startedAt: new Date(s.startedAt),
+      finishedAt: new Date(s.finishedAt as string),
       // Exercício que ficou sem série não foi feito.
-      exerciseCount: exercicios.filter((e) => (e.sets ?? []).length > 0).length,
-      sets: exercicios.flatMap((e) =>
-        (e.sets ?? []).map((s) => ({ kind: s.kind, weightKg: s.weight_kg, reps: s.reps })),
+      exerciseCount: doTreino.filter((e) => (series.get(e.id) ?? []).length > 0).length,
+      sets: doTreino.flatMap((e) =>
+        (series.get(e.id) ?? []).map((x) => ({ kind: x.kind, weightKg: x.weightKg, reps: x.reps })),
       ),
     };
   });
@@ -402,116 +294,71 @@ export async function listFinishedBetween(
  * Recordes
  * ------------------------------------------------------------------ */
 
-type RecordRow = {
-  exercise_id: string;
-  kind: RecordKind;
-  value: string;
-  weight_kg: string;
-  reps: number;
-  session_id: string;
-  achieved_at: string;
-  exercises: { name: string } | null;
-};
-
-const RECORD_SELECT = "exercise_id, kind, value, weight_kg, reps, session_id, achieved_at, exercises ( name )";
-
-function toRecord(row: RecordRow): PersonalRecordView {
-  return {
-    exerciseId: row.exercise_id,
-    exerciseName: row.exercises?.name ?? "",
-    kind: row.kind,
-    value: Number(row.value),
-    weightKg: Number(row.weight_kg),
-    reps: row.reps,
-    sessionId: row.session_id,
-    achievedAt: new Date(row.achieved_at),
-  };
+async function toRecordViews(
+  linhas: { exerciseId: string; kind: RecordKind; value: number; weightKg: number; reps: number; sessionId: string; achievedAt: string }[],
+): Promise<PersonalRecordView[]> {
+  const exercicios = await exerciseMap();
+  return linhas.map((r) => ({
+    exerciseId: r.exerciseId,
+    exerciseName: exercicios.get(r.exerciseId)?.name ?? "",
+    kind: r.kind,
+    value: r.value,
+    weightKg: r.weightKg,
+    reps: r.reps,
+    sessionId: r.sessionId,
+    achievedAt: new Date(r.achievedAt),
+  }));
 }
 
-/** Recordes atuais dos exercícios informados. Vazio para quem nunca treinou. */
+/** Recordes atuais dos exercícios informados. */
 export async function listRecords(exerciseIds: string[]): Promise<PersonalRecordView[]> {
   if (exerciseIds.length === 0) return [];
-  const supabase = await createClient();
-
-  const { data, error } = await supabase.from("personal_records").select(RECORD_SELECT).in("exercise_id", exerciseIds);
-  if (error || !data) return [];
-  return (data as unknown as RecordRow[]).map(toRecord);
+  return toRecordViews(await db.personalRecords.where("exerciseId").anyOf(exerciseIds).toArray());
 }
 
 /** Recordes que ainda pertencem a esta sessão: os que ela bateu e ninguém superou. */
 export async function listSessionRecords(sessionId: string): Promise<PersonalRecordView[]> {
-  const supabase = await createClient();
-
-  const { data, error } = await supabase.from("personal_records").select(RECORD_SELECT).eq("session_id", sessionId);
-  if (error || !data) return [];
-  return (data as unknown as RecordRow[]).map(toRecord);
+  return toRecordViews(await db.personalRecords.where("sessionId").equals(sessionId).toArray());
 }
 
 /* ------------------------------------------------------------------ *
  * Volume da semana
  * ------------------------------------------------------------------ */
 
-export type FinishedSetEntry = {
-  finishedAt: Date;
-  exerciseId: string;
-  kind: SetKind;
-};
-
-export type MuscleInfo = { id: string; name: string; contribution: number };
-
-type VolumeRow = {
-  finished_at: string;
-  session_exercises: { exercise_id: string; sets: { kind: SetKind }[] | null }[] | null;
-};
-
-type MuscleRow = {
-  exercise_id: string;
-  contribution: string;
-  muscles: { id: string; name: string } | null;
-};
+export type FinishedSetEntry = { finishedAt: Date; exerciseId: string; kind: SetKind };
+export type MuscleInfo = { id: string; contribution: number };
 
 /**
  * Séries das sessões concluídas a partir de um instante, mais os músculos
- * de cada exercício envolvido. O recorte exato da semana, no fuso do
- * usuário, e a soma por músculo ficam com quem chama.
+ * de cada exercício envolvido. Primário conta 1, secundário 0,5 — a mesma
+ * contribuição que o seed gravava em exercise_muscles.
  */
 export async function listFinishedSetsSince(
   since: Date,
 ): Promise<{ sets: FinishedSetEntry[]; muscles: Record<string, MuscleInfo[]> }> {
-  const supabase = await createClient();
+  const limite = since.toISOString();
+  const sessoes = (await finishedSessions()).filter((s) => s.finishedAt !== null && s.finishedAt >= limite);
+  if (sessoes.length === 0) return { sets: [], muscles: {} };
 
-  const { data, error } = await supabase
-    .from("workout_sessions")
-    .select("finished_at, session_exercises ( exercise_id, sets ( kind ) )")
-    .eq("status", "concluida")
-    .gte("finished_at", since.toISOString());
+  const fim = new Map(sessoes.map((s) => [s.id, new Date(s.finishedAt as string)]));
+  const exerciciosDaSessao = await db.sessionExercises.where("sessionId").anyOf([...fim.keys()]).toArray();
+  const series = await setsBySessionExercise(exerciciosDaSessao.map((e) => e.id));
 
-  if (error || !data) return { sets: [], muscles: {} };
+  const sets: FinishedSetEntry[] = exerciciosDaSessao.flatMap((e) =>
+    (series.get(e.id) ?? []).map((s) => ({
+      finishedAt: fim.get(e.sessionId) as Date,
+      exerciseId: e.exerciseId,
+      kind: s.kind,
+    })),
+  );
 
-  const sets: FinishedSetEntry[] = [];
-  for (const s of data as unknown as VolumeRow[]) {
-    const finishedAt = new Date(s.finished_at);
-    for (const e of s.session_exercises ?? []) {
-      for (const set of e.sets ?? []) sets.push({ finishedAt, exerciseId: e.exercise_id, kind: set.kind });
-    }
-  }
-
-  const ids = [...new Set(sets.map((s) => s.exerciseId))];
-  if (ids.length === 0) return { sets, muscles: {} };
-
-  const { data: vinculos } = await supabase
-    .from("exercise_muscles")
-    .select("exercise_id, contribution, muscles ( id, name )")
-    .in("exercise_id", ids);
-
+  const exercicios = await exerciseMap();
   const muscles: Record<string, MuscleInfo[]> = {};
-  for (const v of (vinculos ?? []) as unknown as MuscleRow[]) {
-    if (!v.muscles) continue;
-    (muscles[v.exercise_id] ??= []).push({
-      id: v.muscles.id,
-      name: v.muscles.name,
-      contribution: Number(v.contribution),
-    });
+  for (const id of new Set(sets.map((s) => s.exerciseId))) {
+    muscles[id] = (exercicios.get(id)?.muscles ?? []).map((m) => ({
+      id: m.muscleId,
+      contribution: m.role === "primario" ? 1 : 0.5,
+    }));
   }
   return { sets, muscles };
 }

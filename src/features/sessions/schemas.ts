@@ -61,4 +61,6 @@ export type SessionActionState = {
   fieldErrors?: Record<string, string[]>;
   /** Formulário que fica na tela depois de salvar precisa dizer que salvou. */
   ok?: boolean;
+  /** A tela navega para cá quando a ação conclui. */
+  redirectTo?: string;
 };

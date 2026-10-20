@@ -1,6 +1,4 @@
-import { signOut } from "@/features/auth/actions";
-import { LogOut } from "lucide-react";
-
+/** Sem login, não há "Sair": o nome identifica de quem é o aparelho. */
 export function Topbar({ name }: { name: string }) {
   return (
     <header className="sticky top-0 z-20 flex items-center justify-between border-b border-line bg-ink px-4 pt-[env(safe-area-inset-top,0px)] lg:px-8">
@@ -10,15 +8,7 @@ export function Topbar({ name }: { name: string }) {
         </span>
         <span className="hidden text-sm text-muted lg:inline">{name}</span>
       </div>
-      <form action={signOut}>
-        <button
-          type="submit"
-          className="flex min-h-11 items-center gap-2 rounded px-3 text-sm text-muted hover:bg-raised"
-        >
-          <LogOut className="size-4" aria-hidden />
-          <span className="hidden sm:inline">Sair</span>
-        </button>
-      </form>
+      <span className="truncate text-sm text-muted lg:hidden">{name}</span>
     </header>
   );
 }

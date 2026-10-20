@@ -1,9 +1,7 @@
-"use server";
-
-import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
-import { createClient } from "@/core/auth/server";
-import { requireUser } from "@/core/auth/session";
+import { db } from "@/core/data/db";
+import { findExercise } from "@/core/data/exercises";
+import { nowIso, toKg } from "@/core/data/types";
+import { newId } from "@/core/utils/uuid";
 import { defaultDayName } from "./labels";
 import {
   createRoutineSchema,
@@ -17,237 +15,130 @@ import {
   type RoutineActionState,
 } from "./schemas";
 
+/*
+ * Programas no aparelho. As travas que o Postgres garantia na 0005 —
+ * cascade de dias e prescrições, uma rotina ativa por usuário, CHECK de
+ * faixa — agora são deste arquivo, sempre em `db.transaction`, que aqui é
+ * atômica: o rollback manual da versão com banco deixa de existir.
+ *
+ * Execução aponta para o plano com SET NULL: apagar um dia ou uma
+ * prescrição desliga as sessões que apontavam para eles, sem apagá-las.
+ */
+
 /** Prescrição inicial ao trazer um exercício do catálogo para o dia. */
 const PRESCRICAO_PADRAO = { targetSets: 3, repMin: 8, repMax: 12, targetRir: 2 };
 
-function revalidar(routineId?: string) {
-  revalidatePath("/treinos");
-  if (routineId) {
-    revalidatePath(`/treinos/${routineId}`);
-    revalidatePath(`/treinos/${routineId}/editar`);
-  }
-}
-
-/** Sobe do dia para a rotina, para saber o que revalidar. */
-async function routineIdOfDay(dayId: string): Promise<string | null> {
-  const supabase = await createClient();
-  const { data } = await supabase.from("routine_days").select("routine_id").eq("id", dayId).maybeSingle();
-  return (data as { routine_id: string } | null)?.routine_id ?? null;
-}
-
-async function routineIdOfPrescription(prescriptionId: string): Promise<string | null> {
-  const supabase = await createClient();
-  const { data } = await supabase
-    .from("routine_exercises")
-    .select("routine_days ( routine_id )")
-    .eq("id", prescriptionId)
-    .maybeSingle();
-  const row = data as { routine_days: { routine_id: string } | null } | null;
-  return row?.routine_days?.routine_id ?? null;
-}
+const ERRO_GRAVAR = "Não foi possível salvar no aparelho. Tente de novo.";
 
 /* ------------------------------------------------------------------ *
  * Programa
  * ------------------------------------------------------------------ */
 
-export async function createRoutine(
-  _prev: RoutineActionState,
-  formData: FormData,
-): Promise<RoutineActionState> {
-  const user = await requireUser();
+export async function createRoutine(_prev: RoutineActionState, formData: FormData): Promise<RoutineActionState> {
   const parsed = createRoutineSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: parsed.error.flatten().fieldErrors };
 
-  const supabase = await createClient();
-  const { data: criada, error } = await supabase
-    .from("routines")
-    .insert({
-      user_id: user.id,
-      name: parsed.data.name,
-      description: parsed.data.description || null,
-    })
-    .select("id")
-    .single();
-
-  if (error || !criada) return { error: "Não foi possível criar o programa. Tente de novo." };
-
-  const dias = Array.from({ length: parsed.data.dayCount }, (_, i) => ({
-    routine_id: criada.id,
-    name: defaultDayName(i),
-    position: i,
-  }));
-
-  const { error: erroDias } = await supabase.from("routine_days").insert(dias);
-  if (erroDias) {
-    // Programa sem dia nenhum não serve para nada: melhor desfazer.
-    await supabase.from("routines").delete().eq("id", criada.id);
-    return { error: "Não foi possível criar os dias do programa. Tente de novo." };
+  const id = newId();
+  try {
+    await db.transaction("rw", db.routines, db.routineDays, async () => {
+      await db.routines.add({
+        id,
+        name: parsed.data.name,
+        description: parsed.data.description || null,
+        isActive: false,
+        archivedAt: null,
+        createdAt: nowIso(),
+      });
+      await db.routineDays.bulkAdd(
+        Array.from({ length: parsed.data.dayCount }, (_, i) => ({
+          id: newId(),
+          routineId: id,
+          name: defaultDayName(i),
+          position: i,
+          suggestedWeekday: null,
+          notes: null,
+        })),
+      );
+    });
+  } catch {
+    return { error: "Não foi possível criar o programa. Tente de novo." };
   }
 
-  revalidar(criada.id);
-  redirect(`/treinos/${criada.id}/editar`);
+  return { redirectTo: `/treinos/${id}/editar` };
 }
 
-export async function renameRoutine(
-  _prev: RoutineActionState,
-  formData: FormData,
-): Promise<RoutineActionState> {
-  await requireUser();
+export async function renameRoutine(_prev: RoutineActionState, formData: FormData): Promise<RoutineActionState> {
   const parsed = renameRoutineSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: parsed.error.flatten().fieldErrors };
 
-  const supabase = await createClient();
-  const { error } = await supabase
-    .from("routines")
-    .update({ name: parsed.data.name, description: parsed.data.description || null })
-    .eq("id", parsed.data.id);
-
-  if (error) return { error: "Não foi possível salvar. Tente de novo." };
-
-  revalidar(parsed.data.id);
-  return {};
+  const n = await db.routines.update(parsed.data.id, {
+    name: parsed.data.name,
+    description: parsed.data.description || null,
+  });
+  return n ? {} : { error: ERRO_GRAVAR };
 }
 
-/**
- * Só uma rotina ativa por usuário, garantido por índice parcial único. Por
- * isso desativa as outras antes: ativar primeiro violaria o índice.
- */
+/** Só uma rotina ativa: desativa as outras na mesma transação. */
 export async function activateRoutine(formData: FormData) {
-  const user = await requireUser();
   const parsed = routineIdSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return;
 
-  const supabase = await createClient();
-  await supabase
-    .from("routines")
-    .update({ is_active: false })
-    .eq("user_id", user.id)
-    .eq("is_active", true)
-    .neq("id", parsed.data.id);
-
-  await supabase.from("routines").update({ is_active: true }).eq("id", parsed.data.id).is("archived_at", null);
-
-  revalidar(parsed.data.id);
+  await db.transaction("rw", db.routines, async () => {
+    const alvo = await db.routines.get(parsed.data.id);
+    if (!alvo || alvo.archivedAt) return;
+    await db.routines.toCollection().modify((r) => {
+      r.isActive = r.id === alvo.id;
+    });
+  });
 }
 
-/** Exclusão lógica: o histórico da Fase 6 vai apontar para estes dias. */
+/** Exclusão lógica: o histórico aponta para os dias. Ativa deixa de ser. */
 export async function archiveRoutine(formData: FormData) {
-  await requireUser();
   const parsed = routineIdSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return;
-
-  const supabase = await createClient();
-  // is_active vai junto: o CHECK da 0005 proíbe arquivada e ativa ao mesmo tempo.
-  await supabase
-    .from("routines")
-    .update({ archived_at: new Date().toISOString(), is_active: false })
-    .eq("id", parsed.data.id);
-
-  revalidar(parsed.data.id);
+  await db.routines.update(parsed.data.id, { archivedAt: nowIso(), isActive: false });
 }
 
 export async function unarchiveRoutine(formData: FormData) {
-  await requireUser();
   const parsed = routineIdSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return;
-
-  const supabase = await createClient();
-  await supabase.from("routines").update({ archived_at: null }).eq("id", parsed.data.id);
-
-  revalidar(parsed.data.id);
+  await db.routines.update(parsed.data.id, { archivedAt: null });
 }
 
-/**
- * Duplicar são três inserções e o supabase-js não dá transação. Se a
- * segunda ou a terceira falhar, apaga a rotina criada — o cascade leva os
- * filhos junto. Mesmo padrão de `createCustomExercise`, na Fase 2.
- */
-export async function duplicateRoutine(formData: FormData) {
-  const user = await requireUser();
+/** Cópia com dias e prescrições. Devolve o id novo para a tela navegar. */
+export async function duplicateRoutine(formData: FormData): Promise<string | null> {
   const parsed = routineIdSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return;
+  if (!parsed.success) return null;
 
-  const supabase = await createClient();
+  return db.transaction("rw", db.routines, db.routineDays, db.routineExercises, async () => {
+    const origem = await db.routines.get(parsed.data.id);
+    if (!origem) return null;
 
-  const { data: origem } = await supabase
-    .from("routines")
-    .select(
-      `name, description,
-       routine_days ( name, position, suggested_weekday, notes,
-         routine_exercises ( exercise_id, position, target_sets, rep_min, rep_max,
-                             target_rir, rest_seconds, load_step_kg_override,
-                             superset_group, notes ) )`,
-    )
-    .eq("id", parsed.data.id)
-    .maybeSingle();
+    const id = newId();
+    await db.routines.add({
+      id,
+      name: `${origem.name} (cópia)`.slice(0, 60),
+      description: origem.description,
+      isActive: false,
+      archivedAt: null,
+      createdAt: nowIso(),
+    });
 
-  if (!origem) return;
+    const dias = await db.routineDays.where("routineId").equals(origem.id).toArray();
+    const novoId = new Map(dias.map((d) => [d.id, newId()]));
+    await db.routineDays.bulkAdd(dias.map((d) => ({ ...d, id: novoId.get(d.id)!, routineId: id })));
 
-  type DiaOrigem = {
-    name: string;
-    position: number;
-    suggested_weekday: number | null;
-    notes: string | null;
-    routine_exercises: Record<string, unknown>[] | null;
-  };
-  const fonte = origem as unknown as { name: string; description: string | null; routine_days: DiaOrigem[] | null };
-
-  const { data: copia, error } = await supabase
-    .from("routines")
-    .insert({
-      user_id: user.id,
-      name: `${fonte.name} (cópia)`.slice(0, 60),
-      description: fonte.description,
-    })
-    .select("id")
-    .single();
-
-  if (error || !copia) return;
-
-  const diasOrigem = fonte.routine_days ?? [];
-  if (diasOrigem.length === 0) {
-    revalidar(copia.id);
-    redirect(`/treinos/${copia.id}`);
-  }
-
-  const { data: diasNovos, error: erroDias } = await supabase
-    .from("routine_days")
-    .insert(
-      diasOrigem.map((d) => ({
-        routine_id: copia.id,
-        name: d.name,
-        position: d.position,
-        suggested_weekday: d.suggested_weekday,
-        notes: d.notes,
-      })),
-    )
-    .select("id, position");
-
-  if (erroDias || !diasNovos) {
-    await supabase.from("routines").delete().eq("id", copia.id);
-    return;
-  }
-
-  // A ordem de retorno do insert não é garantida; `position` é o que liga
-  // o dia novo ao original, e dentro da cópia ela não se repete.
-  const porPosicao = new Map((diasNovos as { id: string; position: number }[]).map((d) => [d.position, d.id]));
-
-  const prescricoes = diasOrigem.flatMap((d) => {
-    const novoDia = porPosicao.get(d.position);
-    if (!novoDia) return [];
-    return (d.routine_exercises ?? []).map((e) => ({ ...e, routine_day_id: novoDia }));
-  });
-
-  if (prescricoes.length > 0) {
-    const { error: erroPrescricoes } = await supabase.from("routine_exercises").insert(prescricoes);
-    if (erroPrescricoes) {
-      await supabase.from("routines").delete().eq("id", copia.id);
-      return;
+    if (dias.length > 0) {
+      const prescricoes = await db.routineExercises
+        .where("routineDayId")
+        .anyOf(dias.map((d) => d.id))
+        .toArray();
+      await db.routineExercises.bulkAdd(
+        prescricoes.map((p) => ({ ...p, id: newId(), routineDayId: novoId.get(p.routineDayId)! })),
+      );
     }
-  }
-
-  revalidar(copia.id);
-  redirect(`/treinos/${copia.id}`);
+    return id;
+  });
 }
 
 /* ------------------------------------------------------------------ *
@@ -255,92 +146,58 @@ export async function duplicateRoutine(formData: FormData) {
  * ------------------------------------------------------------------ */
 
 export async function addDay(formData: FormData) {
-  await requireUser();
   const parsed = addDaySchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return;
 
-  const supabase = await createClient();
-  const { data: existentes } = await supabase
-    .from("routine_days")
-    .select("position")
-    .eq("routine_id", parsed.data.routineId);
-
-  const posicoes = (existentes ?? []) as { position: number }[];
-  const proxima = posicoes.length === 0 ? 0 : Math.max(...posicoes.map((d) => d.position)) + 1;
-
-  await supabase.from("routine_days").insert({
-    routine_id: parsed.data.routineId,
-    name: defaultDayName(posicoes.length),
-    position: proxima,
+  await db.transaction("rw", db.routineDays, async () => {
+    const existentes = await db.routineDays.where("routineId").equals(parsed.data.routineId).toArray();
+    const proxima = existentes.length === 0 ? 0 : Math.max(...existentes.map((d) => d.position)) + 1;
+    await db.routineDays.add({
+      id: newId(),
+      routineId: parsed.data.routineId,
+      name: defaultDayName(existentes.length),
+      position: proxima,
+      suggestedWeekday: null,
+      notes: null,
+    });
   });
-
-  revalidar(parsed.data.routineId);
 }
 
 export async function updateDay(_prev: RoutineActionState, formData: FormData): Promise<RoutineActionState> {
-  await requireUser();
   const parsed = daySchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: parsed.error.flatten().fieldErrors };
 
-  const supabase = await createClient();
-  const { error } = await supabase
-    .from("routine_days")
-    .update({
-      name: parsed.data.name,
-      suggested_weekday: parsed.data.suggestedWeekday,
-      notes: parsed.data.notes || null,
-    })
-    .eq("id", parsed.data.id);
-
-  if (error) return { error: "Não foi possível salvar o dia. Tente de novo." };
-
-  revalidar((await routineIdOfDay(parsed.data.id)) ?? undefined);
-  return {};
+  const n = await db.routineDays.update(parsed.data.id, {
+    name: parsed.data.name,
+    suggestedWeekday: parsed.data.suggestedWeekday,
+    notes: parsed.data.notes || null,
+  });
+  return n ? {} : { error: "Não foi possível salvar o dia. Tente de novo." };
 }
 
+/** Leva as prescrições do dia; as sessões ficam, com o vínculo nulo. */
 export async function removeDay(formData: FormData) {
-  await requireUser();
   const parsed = routineIdSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return;
+  const diaId = parsed.data.id;
 
-  const routineId = await routineIdOfDay(parsed.data.id);
-
-  const supabase = await createClient();
-  // Cascade leva as prescrições do dia. As sessões que apontam para ele
-  // ficam com routine_day_id nulo (SET NULL na 0006) e mantêm o snapshot.
-  await supabase.from("routine_days").delete().eq("id", parsed.data.id);
-
-  revalidar(routineId ?? undefined);
+  await db.transaction("rw", [db.routineDays, db.routineExercises, db.sessions, db.sessionExercises], async () => {
+    const prescricoes = await db.routineExercises.where("routineDayId").equals(diaId).primaryKeys();
+    await db.sessionExercises.where("routineExerciseId").anyOf(prescricoes).modify({ routineExerciseId: null });
+    await db.sessions.where("routineDayId").equals(diaId).modify({ routineDayId: null });
+    await db.routineExercises.bulkDelete(prescricoes);
+    await db.routineDays.delete(diaId);
+  });
 }
 
-/**
- * Reordenação manda a lista inteira e grava num `upsert` só, que o
- * PostgREST executa como uma instrução. Sequência de updates deixaria a
- * ordem pela metade se a conexão caísse no meio — e ela cai, na academia.
- */
+/** Grava a ordem inteira de uma vez, como o upsert único da versão com banco. */
 export async function reorderDays(formData: FormData) {
-  await requireUser();
   const parsed = reorderSchema.safeParse({ ids: formData.getAll("ids").map(String) });
   if (!parsed.success) return;
 
-  const supabase = await createClient();
-  const { data } = await supabase
-    .from("routine_days")
-    .select("id, routine_id, name")
-    .in("id", parsed.data.ids);
-
-  const atuais = (data ?? []) as { id: string; routine_id: string; name: string }[];
-  if (atuais.length !== parsed.data.ids.length) return;
-
-  const porId = new Map(atuais.map((d) => [d.id, d]));
-  const linhas = parsed.data.ids.flatMap((id, posicao) => {
-    const d = porId.get(id);
-    return d ? [{ id: d.id, routine_id: d.routine_id, name: d.name, position: posicao }] : [];
+  await db.transaction("rw", db.routineDays, async () => {
+    for (const [posicao, id] of parsed.data.ids.entries()) await db.routineDays.update(id, { position: posicao });
   });
-
-  await supabase.from("routine_days").upsert(linhas, { onConflict: "id" });
-
-  revalidar(atuais[0]?.routine_id);
 }
 
 /* ------------------------------------------------------------------ *
@@ -348,105 +205,69 @@ export async function reorderDays(formData: FormData) {
  * ------------------------------------------------------------------ */
 
 export async function addExercise(formData: FormData) {
-  await requireUser();
   const parsed = addExerciseSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return;
 
-  const supabase = await createClient();
+  const exercicio = await findExercise(parsed.data.exerciseId);
+  if (!exercicio) return;
 
-  const [{ data: existentes }, { data: exercicio }] = await Promise.all([
-    supabase.from("routine_exercises").select("position").eq("routine_day_id", parsed.data.routineDayId),
-    supabase.from("exercises").select("default_rest_seconds").eq("id", parsed.data.exerciseId).maybeSingle(),
-  ]);
-
-  const posicoes = (existentes ?? []) as { position: number }[];
-  const proxima = posicoes.length === 0 ? 0 : Math.max(...posicoes.map((e) => e.position)) + 1;
-  const descanso = (exercicio as { default_rest_seconds: number } | null)?.default_rest_seconds ?? 120;
-
-  await supabase.from("routine_exercises").insert({
-    routine_day_id: parsed.data.routineDayId,
-    exercise_id: parsed.data.exerciseId,
-    position: proxima,
-    target_sets: PRESCRICAO_PADRAO.targetSets,
-    rep_min: PRESCRICAO_PADRAO.repMin,
-    rep_max: PRESCRICAO_PADRAO.repMax,
-    target_rir: PRESCRICAO_PADRAO.targetRir,
-    rest_seconds: descanso,
+  await db.transaction("rw", db.routineExercises, async () => {
+    const existentes = await db.routineExercises.where("routineDayId").equals(parsed.data.routineDayId).toArray();
+    const proxima = existentes.length === 0 ? 0 : Math.max(...existentes.map((e) => e.position)) + 1;
+    await db.routineExercises.add({
+      id: newId(),
+      routineDayId: parsed.data.routineDayId,
+      exerciseId: exercicio.id,
+      position: proxima,
+      targetSets: PRESCRICAO_PADRAO.targetSets,
+      repMin: PRESCRICAO_PADRAO.repMin,
+      repMax: PRESCRICAO_PADRAO.repMax,
+      targetRir: PRESCRICAO_PADRAO.targetRir,
+      restSeconds: exercicio.defaultRestSeconds,
+      loadStepKgOverride: null,
+      supersetGroup: null,
+      notes: null,
+    });
   });
-
-  revalidar((await routineIdOfDay(parsed.data.routineDayId)) ?? undefined);
 }
 
 export async function updatePrescription(
   _prev: RoutineActionState,
   formData: FormData,
 ): Promise<RoutineActionState> {
-  await requireUser();
   const parsed = prescriptionSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: parsed.error.flatten().fieldErrors };
 
-  const supabase = await createClient();
-  const { error } = await supabase
-    .from("routine_exercises")
-    .update({
-      target_sets: parsed.data.targetSets,
-      rep_min: parsed.data.repMin,
-      rep_max: parsed.data.repMax,
-      target_rir: parsed.data.targetRir,
-      rest_seconds: parsed.data.restSeconds,
-      load_step_kg_override: parsed.data.loadStepKgOverride,
-      notes: parsed.data.notes || null,
-    })
-    .eq("id", parsed.data.id);
-
-  if (error) return { error: "Não foi possível salvar a prescrição. Tente de novo." };
-
-  revalidar((await routineIdOfPrescription(parsed.data.id)) ?? undefined);
-  return {};
+  const n = await db.routineExercises.update(parsed.data.id, {
+    targetSets: parsed.data.targetSets,
+    repMin: parsed.data.repMin,
+    repMax: parsed.data.repMax,
+    targetRir: parsed.data.targetRir,
+    restSeconds: parsed.data.restSeconds,
+    loadStepKgOverride: parsed.data.loadStepKgOverride === null ? null : toKg(parsed.data.loadStepKgOverride),
+    notes: parsed.data.notes || null,
+  });
+  return n ? {} : { error: "Não foi possível salvar a prescrição. Tente de novo." };
 }
 
 export async function removeExercise(formData: FormData) {
-  await requireUser();
   const parsed = routineIdSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return;
+  const id = parsed.data.id;
 
-  const routineId = await routineIdOfPrescription(parsed.data.id);
-
-  const supabase = await createClient();
-  await supabase.from("routine_exercises").delete().eq("id", parsed.data.id);
-
-  revalidar(routineId ?? undefined);
+  await db.transaction("rw", db.routineExercises, db.sessionExercises, async () => {
+    await db.sessionExercises.where("routineExerciseId").equals(id).modify({ routineExerciseId: null });
+    await db.routineExercises.delete(id);
+  });
 }
 
 export async function reorderExercises(formData: FormData) {
-  await requireUser();
   const parsed = reorderSchema.safeParse({ ids: formData.getAll("ids").map(String) });
   if (!parsed.success) return;
 
-  const supabase = await createClient();
-  const { data } = await supabase
-    .from("routine_exercises")
-    .select("id, routine_day_id, exercise_id, rep_min, rep_max")
-    .in("id", parsed.data.ids);
-
-  type Linha = {
-    id: string;
-    routine_day_id: string;
-    exercise_id: string;
-    rep_min: number;
-    rep_max: number;
-  };
-  const atuais = (data ?? []) as Linha[];
-  if (atuais.length !== parsed.data.ids.length) return;
-
-  const porId = new Map(atuais.map((e) => [e.id, e]));
-  const linhas = parsed.data.ids.flatMap((id, posicao) => {
-    const e = porId.get(id);
-    return e ? [{ ...e, position: posicao }] : [];
+  await db.transaction("rw", db.routineExercises, async () => {
+    for (const [posicao, id] of parsed.data.ids.entries()) {
+      await db.routineExercises.update(id, { position: posicao });
+    }
   });
-
-  await supabase.from("routine_exercises").upsert(linhas, { onConflict: "id" });
-
-  const dia = atuais[0]?.routine_day_id;
-  revalidar(dia ? ((await routineIdOfDay(dia)) ?? undefined) : undefined);
 }

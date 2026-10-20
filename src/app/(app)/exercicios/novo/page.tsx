@@ -1,14 +1,17 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { requireUser } from "@/core/auth/session";
-import { listMuscles } from "@/features/exercises/queries";
+import { MUSCLES } from "@/core/data/catalog";
 import { NovoExercicioForm } from "./form";
 
 export const metadata = { title: "Novo exercício · Almore" };
 
-export default async function NovoExercicioPage() {
-  await requireUser();
-  const muscles = await listMuscles();
+/**
+ * Os grupos musculares vêm do catálogo dentro do app, então dá para ler
+ * aqui no servidor — direto do catálogo, sem passar pelo banco do
+ * aparelho, que só existe no navegador.
+ */
+export default function NovoExercicioPage() {
+  const muscles = [...MUSCLES].sort((a, b) => a.sortOrder - b.sortOrder);
 
   return (
     <div className="space-y-5">

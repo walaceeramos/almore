@@ -70,4 +70,6 @@ export const reorderSchema = z.object({
 export type RoutineActionState = {
   error?: string;
   fieldErrors?: Record<string, string[]>;
+  /** A tela navega para cá quando a ação conclui. */
+  redirectTo?: string;
 };

@@ -28,4 +28,6 @@ export type CustomExerciseInput = z.infer<typeof customExerciseSchema>;
 export type ExerciseActionState = {
   error?: string;
   fieldErrors?: Record<string, string[]>;
+  /** A tela navega para cá quando a ação conclui. */
+  redirectTo?: string;
 };
