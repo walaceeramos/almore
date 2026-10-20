@@ -14,17 +14,18 @@ não existir, peça ao usuário antes de tomar decisões de arquitetura.
 
 ## Estado atual
 
-Fases 1, 2 e 3 concluídas. Fase 3 validada contra o banco real (rotina
-ativa exclusiva e isolamento entre contas nas três tabelas novas). Fase 4
-implementada, aguardando validação contra o banco real (migration 0006).
+Fases 1 a 4 concluídas. Fase 4 validada pelo usuário no banco real:
+treino iniciado, séries registradas com cronômetro, treino concluído.
+Fase 5 autorizada, em planejamento: nenhum código antes de o plano ser
+aprovado.
 
 | Fase | Estado | O que entrega |
 | --- | --- | --- |
 | 1 | pronta | Fundação, banco, autenticação, perfil, layout, navegação, dashboard |
 | 2 | pronta | Catálogo de exercícios, busca, filtros, exercício personalizado |
 | 3 | pronta | Criar, editar, duplicar e arquivar programas de treino |
-| 4 | validar | Execução do treino: registrar série, cronômetro, concluir |
-| 5 | — | Regras de domínio: progressão, recordes, 1RM, volume, consistência |
+| 4 | pronta | Execução do treino: registrar série, cronômetro, concluir |
+| 5 | planejando | Regras de domínio: progressão, recordes, 1RM, volume, consistência |
 | 6 | — | Histórico de sessões, com edição retroativa |
 | 7 | — | Gráficos de carga, volume e recordes |
 | 8 | — | Metas, peso e medidas |

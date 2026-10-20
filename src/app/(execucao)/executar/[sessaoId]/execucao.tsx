@@ -522,8 +522,6 @@ function ListaExercicios({
   onFechar: () => void;
   onDescartar: () => void;
 }) {
-  const [confirmando, setConfirmando] = useState(false);
-
   return (
     <div className="fixed inset-0 z-40 flex flex-col bg-ink" role="dialog" aria-modal="true" aria-label="Exercícios do treino">
       <header className="flex items-center gap-2 border-b border-line px-3 pt-[env(safe-area-inset-top,0px)]">
@@ -591,28 +589,39 @@ function ListaExercicios({
         <ButtonLink href={`/executar/${sessionId}/resumo`} full>
           Finalizar treino
         </ButtonLink>
-        {confirmando ? (
-          <form action={discardSession} onSubmit={onDescartar} className="space-y-2">
-            <input type="hidden" name="id" value={sessionId} />
-            <p className="text-center text-[13px] text-bad">
-              Apaga o treino e todas as séries registradas. Não dá para desfazer.
-            </p>
-            <div className="flex gap-2">
-              <Button type="button" variant="ghost" full onClick={() => setConfirmando(false)}>
-                Manter
-              </Button>
-              <Button type="submit" variant="danger" full>
-                Descartar
-              </Button>
-            </div>
-          </form>
-        ) : (
-          <Button type="button" variant="ghost" full className="text-bad" onClick={() => setConfirmando(true)}>
-            Descartar treino
-          </Button>
-        )}
+        <DescartarTreino sessionId={sessionId} onDescartar={onDescartar} />
       </footer>
     </div>
+  );
+}
+
+/** Descarte em dois toques: apaga a sessão inteira e não tem volta. */
+function DescartarTreino({ sessionId, onDescartar }: { sessionId: string; onDescartar: () => void }) {
+  const [confirmando, setConfirmando] = useState(false);
+
+  if (!confirmando) {
+    return (
+      <Button type="button" variant="ghost" full className="text-bad" onClick={() => setConfirmando(true)}>
+        Descartar treino
+      </Button>
+    );
+  }
+
+  return (
+    <form action={discardSession} onSubmit={onDescartar} className="space-y-2">
+      <input type="hidden" name="id" value={sessionId} />
+      <p className="text-center text-[13px] text-bad">
+        Apaga o treino e todas as séries registradas. Não dá para desfazer.
+      </p>
+      <div className="flex gap-2">
+        <Button type="button" variant="ghost" full onClick={() => setConfirmando(false)}>
+          Manter
+        </Button>
+        <Button type="submit" variant="danger" full>
+          Descartar
+        </Button>
+      </div>
+    </form>
   );
 }
 
@@ -732,6 +741,9 @@ export function Execucao({
             Adicionar exercício
           </Button>
           <AvisoErro mensagem={erro} onFechar={() => setErro(null)} />
+        </div>
+        <div className="mt-auto pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))]">
+          <DescartarTreino sessionId={sessionId} onDescartar={parar} />
         </div>
         {seletorAberto && (
           <ExercisePicker
