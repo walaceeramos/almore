@@ -39,7 +39,7 @@ describe("exportBackup", () => {
 
     const b = await exportBackup();
 
-    expect(b.app).toBe("almore");
+    expect(b.app).toBe("seriepro");
     expect(b.version).toBe(BACKUP_VERSION);
     expect(b.exportedAt).toBeTruthy();
   });
@@ -106,7 +106,7 @@ describe("importBackup", () => {
     expect(await db.routineExercises.orderBy("id").toArray()).toEqual(antes.prescricoes);
   });
 
-  it("recusa arquivo que não é backup do Almore", async () => {
+  it("recusa arquivo que não é backup do SériePro", async () => {
     const r = await importBackup(JSON.stringify({ foo: "bar" }));
     expect(r.ok).toBe(false);
   });
@@ -118,6 +118,15 @@ describe("importBackup", () => {
 
     expect(r.ok).toBe(false);
     expect(await db.routines.count()).toBe(1);
+  });
+
+  it("aceita backup exportado quando o app se chamava Almore", async () => {
+    await dadosDeExemplo();
+    const b = await exportBackup();
+
+    const r = await importBackup(JSON.stringify({ ...b, app: "almore" }));
+
+    expect(r.ok).toBe(true);
   });
 
   it("recusa backup de versão futura, que este app não sabe ler", async () => {

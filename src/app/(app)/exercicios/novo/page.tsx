@@ -3,7 +3,7 @@ import { ArrowLeft } from "lucide-react";
 import { MUSCLES } from "@/core/data/catalog";
 import { NovoExercicioForm } from "./form";
 
-export const metadata = { title: "Novo exercício · Almore" };
+export const metadata = { title: "Novo exercício · SériePro" };
 
 /**
  * Os grupos musculares vêm do catálogo dentro do app, então dá para ler

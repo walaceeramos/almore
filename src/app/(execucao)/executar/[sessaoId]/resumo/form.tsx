@@ -19,6 +19,7 @@ export function ConcluirForm({ sessionId }: { sessionId: string }) {
       onSubmit={() => {
         // O descanso pendente não interessa mais depois de concluir.
         try {
+          window.localStorage.removeItem(`seriepro:descanso:${sessionId}`);
           window.localStorage.removeItem(`almore:descanso:${sessionId}`);
         } catch {
           // Armazenamento bloqueado: nada a limpar.

@@ -56,7 +56,7 @@ export function ExercicioView({ id }: { id: string }) {
 
   return (
     <div className="space-y-5">
-      <title>{`${e.name} · Almore`}</title>
+      <title>{`${e.name} · SériePro`}</title>
       <Link href="/exercicios" className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-body">
         <ArrowLeft className="size-4" aria-hidden />
         Exercícios

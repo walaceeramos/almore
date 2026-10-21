@@ -1,4 +1,4 @@
-# Almore — Fases 1 e 2
+# SériePro — Fases 1 e 2
 
 Plataforma de gerenciamento de treino. Esta fase entrega a fundação:
 projeto, banco, autenticação, perfil, layout, navegação e dashboard.

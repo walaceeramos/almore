@@ -21,7 +21,7 @@ const barlowCondensed = Barlow_Condensed({
 });
 
 export const metadata: Metadata = {
-  title: { default: "Almore", template: "%s" },
+  title: { default: "SériePro", template: "%s" },
   description: "Registro de treino que decide o próximo passo.",
 };
 

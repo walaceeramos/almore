@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { NovoProgramaForm } from "./form";
 
-export const metadata = { title: "Novo programa · Almore" };
+export const metadata = { title: "Novo programa · SériePro" };
 
 export default function NovoProgramaPage() {
   return (

@@ -1,6 +1,6 @@
 import { EmptyState } from "@/components/ui/card";
 
-export const metadata = { title: "Metas · Almore" };
+export const metadata = { title: "Metas · SériePro" };
 
 export default function Page() {
   return (

@@ -1,6 +1,6 @@
 import { ExercicioView } from "./view";
 
-export const metadata = { title: "Exercício · Almore" };
+export const metadata = { title: "Exercício · SériePro" };
 
 export default async function ExercicioPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

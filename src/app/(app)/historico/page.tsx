@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import { Loading } from "@/components/ui/loading";
 import { HistoricoView } from "./view";
 
-export const metadata = { title: "Histórico · Almore" };
+export const metadata = { title: "Histórico · SériePro" };
 
 /** Suspense porque a tela lê o mês e o programa da URL no cliente. */
 export default function HistoricoPage() {

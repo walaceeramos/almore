@@ -96,7 +96,7 @@ export function ProgramaView({ id }: { id: string }) {
 
   return (
     <div className="space-y-5">
-      <title>{`${programa.name} · Almore`}</title>
+      <title>{`${programa.name} · SériePro`}</title>
       <Link href="/treinos" className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-body">
         <ArrowLeft className="size-4" aria-hidden />
         Treinos

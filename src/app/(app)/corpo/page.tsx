@@ -1,6 +1,6 @@
 import { EmptyState } from "@/components/ui/card";
 
-export const metadata = { title: "Peso e medidas · Almore" };
+export const metadata = { title: "Peso e medidas · SériePro" };
 
 export default function Page() {
   return (

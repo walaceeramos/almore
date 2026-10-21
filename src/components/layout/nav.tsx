@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { primaryNav, secondaryNav, moreIcon as MoreIcon } from "@/config/nav";
 import { cn } from "@/core/utils/cn";
+import { Logo } from "./logo";
 
 function isActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(href + "/");
@@ -99,9 +100,7 @@ export function Sidebar() {
       className="fixed inset-y-0 left-0 hidden w-60 border-r border-line bg-surface px-3 py-5 lg:block"
       aria-label="Navegação principal"
     >
-      <p className="px-3 font-condensed text-2xl font-bold tracking-wide">
-        ALM<span className="text-brand">O</span>RE
-      </p>
+      <Logo className="px-3" />
       <nav className="mt-6 space-y-0.5">
         {[...primaryNav, ...secondaryNav].map((item) => {
           const active = isActive(pathname, item.href);

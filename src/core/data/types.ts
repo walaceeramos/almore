@@ -181,3 +181,13 @@ export function toKg(n: number): number {
 export function nowIso(): string {
   return new Date().toISOString();
 }
+
+/**
+ * Linha de controle interno, fora do backup. Hoje guarda só a marca de
+ * que os dados vieram do banco antigo, chamado "almore".
+ */
+export type Meta = {
+  id: string;
+  value: string;
+  at: string;
+};

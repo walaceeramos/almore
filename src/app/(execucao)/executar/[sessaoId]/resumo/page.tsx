@@ -1,6 +1,6 @@
 import { ResumoView } from "./view";
 
-export const metadata = { title: "Resumo do treino · Almore" };
+export const metadata = { title: "Resumo do treino · SériePro" };
 
 export default async function ResumoPage({ params }: { params: Promise<{ sessaoId: string }> }) {
   const { sessaoId } = await params;

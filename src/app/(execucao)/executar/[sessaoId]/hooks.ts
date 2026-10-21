@@ -29,12 +29,16 @@ export type Descanso = { fim: number; total: number };
  * por sessão de treino.
  */
 export function useRestTimer(sessionId: string) {
-  const chave = `almore:descanso:${sessionId}`;
+  const chave = `seriepro:descanso:${sessionId}`;
+  // Chave de quando o app se chamava Almore. Lida uma vez para não perder
+  // o descanso de quem estava no meio de um treino durante a atualização.
+  const chaveAnterior = `almore:descanso:${sessionId}`;
   const [descanso, setDescanso] = useState<Descanso | null>(null);
 
   useEffect(() => {
     try {
-      const bruto = window.localStorage.getItem(chave);
+      const bruto = window.localStorage.getItem(chave) ?? window.localStorage.getItem(chaveAnterior);
+      window.localStorage.removeItem(chaveAnterior);
       if (!bruto) return;
       const d = JSON.parse(bruto) as Partial<Descanso>;
       // Descanso que acabou há mais de um minuto não interessa mais.
@@ -46,7 +50,7 @@ export function useRestTimer(sessionId: string) {
     } catch {
       // Armazenamento bloqueado (aba privada): o cronômetro funciona sem persistir.
     }
-  }, [chave]);
+  }, [chave, chaveAnterior]);
 
   const gravar = useCallback(
     (d: Descanso | null) => {

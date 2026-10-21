@@ -1,6 +1,6 @@
 import { EditarProgramaView } from "./view";
 
-export const metadata = { title: "Editar programa · Almore" };
+export const metadata = { title: "Editar programa · SériePro" };
 
 export default async function EditarProgramaPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

@@ -83,7 +83,7 @@ export function TreinoHistoricoView({ sessaoId }: { sessaoId: string }) {
 
   return (
     <div className="space-y-5">
-      <title>{`${sessao.title} · Almore`}</title>
+      <title>{`${sessao.title} · SériePro`}</title>
       <Link href="/historico" className="inline-flex min-h-11 items-center gap-1.5 text-sm text-muted hover:text-body">
         <ArrowLeft className="size-4" aria-hidden />
         Histórico

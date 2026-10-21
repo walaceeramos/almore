@@ -5,7 +5,7 @@ consistência entre as etapas de desenvolvimento.
 
 ## O que é este projeto
 
-Almore — plataforma web de gerenciamento de treino de força. Usada
+SériePro — plataforma web de gerenciamento de treino de força. Usada
 principalmente no celular, dentro da academia, entre séries. Essa condição
 de uso governa quase todas as decisões técnicas.
 
@@ -30,6 +30,27 @@ com estes termos aprovados:
 
 Quando o banco for decidido, ele entra como segunda implementação de
 `core/data` ou como sincronização (Fase 9), sem reescrever telas nem regras.
+
+## Nome: SériePro (antes Almore)
+
+O app se chamava Almore. O que é visível virou SériePro; o que guarda dado
+teve de ser tratado com cuidado:
+
+- **Banco no aparelho**: passou a se chamar `seriepro`. IndexedDB não
+  renomeia banco — nome novo é banco novo e vazio —, então
+  `migraDoBancoAnterior` em `core/data/db.ts` copia o conteúdo de `almore`
+  na primeira abertura, por `db.on("ready")`. **Não apaga o banco antigo**:
+  ele fica como rede de segurança. Uma marca na tabela `meta` impede
+  repetir a cópia, senão apagar tudo dentro do app ressuscitaria os dados
+  antigos. Coberto por `tests/data/migracao.test.ts`.
+- **Backup**: exporta `app: "seriepro"` e aceita `"almore"` na importação,
+  para o arquivo exportado antes do rename continuar válido.
+- **Cronômetro**: a chave no localStorage virou `seriepro:descanso:`, com
+  leitura única da antiga para não perder descanso em andamento.
+- **Marca**: símbolo de três barras inclinadas em
+  `components/layout/logo.tsx`, na cor `brand` (#f5a524). Verde está
+  descartado de propósito: no modo execução verde já significa "subir
+  carga", e a marca competiria com o veredito.
 
 ## Estado atual
 
@@ -121,7 +142,8 @@ npm run dev         # desenvolvimento
 npm run build       # build de produção
 npm run typecheck   # checagem de tipos
 npx eslint .        # lint
-npm test            # testes de unidade de core/domain (Vitest, tests/unit)
+npm test            # Vitest: tests/unit (core/domain, puro) e tests/data
+                    # (core/data e features/*/actions.ts, com fake-indexeddb)
 python scripts/gerar_seed.py   # regera o catálogo (TS) e o seed SQL guardado
 ```
 
@@ -142,12 +164,8 @@ real só foram aplicadas até a 0006.
   deixaram de existir e as telas mostram carregamento. Falta o usuário
   confirmar se a sensação de lentidão sumiu.
 - **Animação de status do treino.** A ajustar.
-- **`kg()` em `core/utils/format.ts` corta zero de número inteiro.**
-  `kg(80)` devolve "8"; com string ("80.00") funciona. As telas passam
-  `n.toFixed(2)`. Corrigir a função espera autorização (regra 1).
-- **Sem teste automático da camada de dados.** As regras de domínio têm
-  testes; as ações em `features/*/actions.ts` não, porque testar IndexedDB
-  em Node exige `fake-indexeddb` (biblioteca nova, regra 3).
+- **Ícone do PWA.** Há favicon (`src/app/icon.svg`); o conjunto 192/512 do
+  manifesto entra na Fase 9.
 
 ## Fase 6 — escopo entregue
 

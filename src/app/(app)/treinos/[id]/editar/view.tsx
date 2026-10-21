@@ -32,7 +32,7 @@ export function EditarProgramaView({ id }: { id: string }) {
 
   return (
     <div className="space-y-5">
-      <title>{`Editar ${programa.name} · Almore`}</title>
+      <title>{`Editar ${programa.name} · SériePro`}</title>
       <Link
         href={`/treinos/${programa.id}`}
         className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-body"

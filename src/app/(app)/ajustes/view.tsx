@@ -8,9 +8,9 @@ import { Card, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { kg } from "@/core/utils/format";
 
-/** "almore-backup-2026-10-20.json" */
+/** "seriepro-backup-2026-10-21.json" */
 function nomeDoArquivo(): string {
-  return `almore-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  return `seriepro-backup-${new Date().toISOString().slice(0, 10)}.json`;
 }
 
 function Backup() {
