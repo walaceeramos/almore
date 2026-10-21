@@ -1,7 +1,5 @@
 import { z } from "zod";
-
-/** Espelha os CHECK da migration 0006. O banco é a última palavra. */
-const uuidSchema = z.string().uuid("Identificador inválido");
+import { exerciseIdSchema, rowIdSchema as uuidSchema } from "@/core/data/id-schemas";
 
 /** Vazio vira nulo; usado nos campos opcionais que chegam por FormData. */
 function opcional<T extends z.ZodTypeAny>(schema: T) {
@@ -47,7 +45,8 @@ export const setIdSchema = z.object({ id: uuidSchema });
 
 export const addSessionExerciseSchema = z.object({
   sessionId: uuidSchema,
-  exerciseId: uuidSchema,
+  // Slug no catálogo, UUID no personalizado. Ver core/data/id-schemas.
+  exerciseId: exerciseIdSchema,
 });
 
 export const finishSessionSchema = z.object({

@@ -275,6 +275,7 @@ function Dia({
 }) {
   const { executar } = useAcao();
   const { erro: erroDia, executar: salvarCampos } = useAcaoComErro();
+  const { erro: erroAdicionar, executar: adicionar } = useAcaoComErro();
   const [seletorAberto, setSeletorAberto] = useState(false);
   const [editandoNome, setEditandoNome] = useState(false);
   const [nome, setNome] = useState(dia.name);
@@ -423,6 +424,7 @@ function Dia({
           <Plus className="size-4" aria-hidden />
           Adicionar exercício
         </button>
+        <AvisoErro mensagem={erroAdicionar} />
       </div>
 
       {seletorAberto && (
@@ -432,7 +434,7 @@ function Dia({
           title={`Adicionar em ${dia.name}`}
           onClose={() => setSeletorAberto(false)}
           onPick={(ex) => {
-            executar(addExercise, { routineDayId: dia.id, exerciseId: ex.id });
+            adicionar(addExercise, { routineDayId: dia.id, exerciseId: ex.id });
             setSeletorAberto(false);
           }}
         />

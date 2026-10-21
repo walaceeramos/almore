@@ -1,10 +1,10 @@
 import { z } from "zod";
+import { exerciseIdSchema, rowIdSchema as uuidSchema } from "@/core/data/id-schemas";
 
 /** Espelha os CHECK da migration 0005. O banco é a última palavra. */
 const nameSchema = z.string().trim().min(2, "Dê um nome ao programa").max(60);
 const dayNameSchema = z.string().trim().min(1, "Dê um nome ao dia").max(60);
 const notesSchema = z.string().trim().max(300).optional();
-const uuidSchema = z.string().uuid("Identificador inválido");
 
 export const createRoutineSchema = z.object({
   name: nameSchema,
@@ -36,7 +36,8 @@ export const addDaySchema = z.object({ routineId: uuidSchema });
 
 export const addExerciseSchema = z.object({
   routineDayId: uuidSchema,
-  exerciseId: uuidSchema,
+  // Slug no catálogo, UUID no personalizado. Ver core/data/id-schemas.
+  exerciseId: exerciseIdSchema,
 });
 
 export const prescriptionSchema = z

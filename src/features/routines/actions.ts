@@ -204,31 +204,44 @@ export async function reorderDays(formData: FormData) {
  * Prescrições
  * ------------------------------------------------------------------ */
 
-export async function addExercise(formData: FormData) {
+export async function addExercise(
+  _prev: RoutineActionState,
+  formData: FormData,
+): Promise<RoutineActionState> {
   const parsed = addExerciseSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return;
+  // Antes saía calado aqui, e o botão parecia morto quando o Zod barrava.
+  if (!parsed.success) return { error: "Exercício inválido." };
 
   const exercicio = await findExercise(parsed.data.exerciseId);
-  if (!exercicio) return;
+  if (!exercicio) return { error: "Exercício não encontrado neste aparelho." };
 
-  await db.transaction("rw", db.routineExercises, async () => {
-    const existentes = await db.routineExercises.where("routineDayId").equals(parsed.data.routineDayId).toArray();
-    const proxima = existentes.length === 0 ? 0 : Math.max(...existentes.map((e) => e.position)) + 1;
-    await db.routineExercises.add({
-      id: newId(),
-      routineDayId: parsed.data.routineDayId,
-      exerciseId: exercicio.id,
-      position: proxima,
-      targetSets: PRESCRICAO_PADRAO.targetSets,
-      repMin: PRESCRICAO_PADRAO.repMin,
-      repMax: PRESCRICAO_PADRAO.repMax,
-      targetRir: PRESCRICAO_PADRAO.targetRir,
-      restSeconds: exercicio.defaultRestSeconds,
-      loadStepKgOverride: null,
-      supersetGroup: null,
-      notes: null,
+  try {
+    await db.transaction("rw", db.routineExercises, async () => {
+      const existentes = await db.routineExercises
+        .where("routineDayId")
+        .equals(parsed.data.routineDayId)
+        .toArray();
+      const proxima = existentes.length === 0 ? 0 : Math.max(...existentes.map((e) => e.position)) + 1;
+      await db.routineExercises.add({
+        id: newId(),
+        routineDayId: parsed.data.routineDayId,
+        exerciseId: exercicio.id,
+        position: proxima,
+        targetSets: PRESCRICAO_PADRAO.targetSets,
+        repMin: PRESCRICAO_PADRAO.repMin,
+        repMax: PRESCRICAO_PADRAO.repMax,
+        targetRir: PRESCRICAO_PADRAO.targetRir,
+        restSeconds: exercicio.defaultRestSeconds,
+        loadStepKgOverride: null,
+        supersetGroup: null,
+        notes: null,
+      });
     });
-  });
+  } catch {
+    return { error: ERRO_GRAVAR };
+  }
+
+  return {};
 }
 
 export async function updatePrescription(
