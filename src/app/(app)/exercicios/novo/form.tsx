@@ -43,7 +43,7 @@ export function NovoExercicioForm({ muscles }: { muscles: Muscle[] }) {
             .filter((m) => m.id !== primario)
             .map((m) => (
               <label key={m.id} className="flex min-h-10 items-center gap-2 text-sm">
-                <input type="checkbox" name="secondaryMuscles" value={m.id} className="size-4 accent-[#f5a524]" />
+                <input type="checkbox" name="secondaryMuscles" value={m.id} className="size-4 accent-brand" />
                 <span className="truncate">{m.name}</span>
               </label>
             ))}
@@ -94,7 +94,7 @@ export function NovoExercicioForm({ muscles }: { muscles: Muscle[] }) {
       </div>
 
       <label className="flex min-h-11 items-center gap-2.5 text-sm">
-        <input type="checkbox" name="isUnilateral" className="size-4 accent-[#f5a524]" />
+        <input type="checkbox" name="isUnilateral" className="size-4 accent-brand" />
         Unilateral, um lado por vez
       </label>
 

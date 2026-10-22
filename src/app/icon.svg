@@ -4,11 +4,11 @@
     src/app/icon.svg; o conjunto 192/512 do manifesto PWA entra na Fase 9.
 
     Fundo escuro próprio em vez de transparente: a aba do navegador pode
-    ser clara ou escura, e o âmbar sobre #0d1417 lê bem nas duas.
+    ser clara ou escura, e o verde-limão sobre #0d1417 lê bem nas duas.
     Geometria igual à de components/layout/logo.tsx.
   -->
   <rect width="32" height="32" rx="7" fill="#0d1417"/>
-  <path d="M12.4 5h14.2l-4.6 7.2H7.8L12.4 5Z" fill="#f5a524"/>
-  <path d="M9.1 12.4h14.2l-4.6 7.2H4.5l4.6-7.2Z" fill="#f5a524" opacity="0.85"/>
-  <path d="M5.4 19.8h14.2L15 27H0.8l4.6-7.2Z" fill="#f5a524" opacity="0.7"/>
+  <path d="M12.4 5h14.2l-4.6 7.2H7.8L12.4 5Z" fill="#a3e635"/>
+  <path d="M9.1 12.4h14.2l-4.6 7.2H4.5l4.6-7.2Z" fill="#a3e635" opacity="0.85"/>
+  <path d="M5.4 19.8h14.2L15 27H0.8l4.6-7.2Z" fill="#a3e635" opacity="0.7"/>
 </svg>

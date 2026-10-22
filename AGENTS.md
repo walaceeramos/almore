@@ -48,9 +48,16 @@ teve de ser tratado com cuidado:
 - **Cronômetro**: a chave no localStorage virou `seriepro:descanso:`, com
   leitura única da antiga para não perder descanso em andamento.
 - **Marca**: símbolo de três barras inclinadas em
-  `components/layout/logo.tsx`, na cor `brand` (#f5a524). Verde está
-  descartado de propósito: no modo execução verde já significa "subir
-  carga", e a marca competiria com o veredito.
+  `components/layout/logo.tsx`, em verde-limão `brand` (#a3e635), com
+  "Série" em branco e "Pro" em verde. Decisão do usuário, a partir do
+  Conceito 1 da identidade.
+- **O verde da marca mudou o significado das cores no modo execução.**
+  Antes `brand` era âmbar e não disputava com o verde de "concluído".
+  Agora: "subir carga" usa `brand` (num app de progressão, subir é a
+  marca), "manter carga" virou neutro — que é o que significa —, e o fim
+  do descanso virou `brand`, com a barra em `muted` enquanto corre.
+  `good` foi para esmeralda (#2fbf71), hue longe do limão, e ficou
+  reservado a "concluído/salvo".
 
 ## Estado atual
 

@@ -7,13 +7,10 @@ import { cn } from "@/core/utils/cn";
  * são as séries — que é o dado em torno do qual o app inteiro gira — e a
  * inclinação dá a leitura de progressão.
  *
- * A cor é `brand` (#f5a524), a mesma que o app já usa na navegação ativa e
- * na etiqueta "ativo". Verde ficaria de fora: no modo execução verde já
- * significa "subir carga", e a marca competiria com o veredito, que é o
- * sinal mais importante da tela mais importante.
- *
  * Desenhado em `currentColor` para servir também em monocromático, que é
- * o que o ícone maskable do Android e o favicon pedem.
+ * o que o ícone maskable do Android e o favicon pedem. A opacidade
+ * decrescente das barras cria a profundidade sem depender de uma segunda
+ * cor, então a versão branca sobre fundo escuro continua funcionando.
  */
 export function LogoMark({ className }: { className?: string }) {
   return (
@@ -34,8 +31,9 @@ export function LogoMark({ className }: { className?: string }) {
 }
 
 /**
- * Marca completa: símbolo mais o nome. "Série" em claro, "Pro" em âmbar,
- * como na identidade.
+ * Marca completa: símbolo em verde-limão, "Série" em branco e "Pro" em
+ * verde, como na identidade. O contraste entre as duas metades é o que
+ * sustenta a leitura do nome — sem ele viraria uma palavra só.
  */
 export function Logo({ className, symbolOnly = false }: { className?: string; symbolOnly?: boolean }) {
   if (symbolOnly) return <LogoMark className={className} />;
@@ -43,7 +41,7 @@ export function Logo({ className, symbolOnly = false }: { className?: string; sy
   return (
     <span className={cn("inline-flex items-center gap-2", className)}>
       <LogoMark />
-      <span className="font-condensed text-2xl font-bold tracking-wide">
+      <span className="font-condensed text-2xl font-bold tracking-tight text-body">
         Série<span className="text-brand">Pro</span>
       </span>
     </span>

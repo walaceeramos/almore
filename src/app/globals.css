@@ -8,8 +8,10 @@
   --color-body: #e9eff1;
   --color-muted: #8ca1ab;
   --color-faint: #657c86;
-  --color-brand: #f5a524;
-  --color-good: #3ecb84;
+  /* Verde-limão da identidade SériePro. Alto contraste sobre --color-ink. */
+  --color-brand: #a3e635;
+  /* Esmeralda, reservado a "concluído": hue bem longe do limão da marca. */
+  --color-good: #2fbf71;
   --color-bad: #f0585d;
 
   --font-sans: var(--font-barlow), ui-sans-serif, system-ui, sans-serif;

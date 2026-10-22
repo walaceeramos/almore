@@ -125,9 +125,16 @@ const RECORDE_LABEL: Record<SetRecordKind, string> = {
   volume_serie: "volume",
 };
 
+/*
+ * Com a marca em verde-limão, "subir" passou a usá-la: num app de
+ * progressão, subir carga é a marca. "Manter" saiu do verde e virou
+ * neutro, que é o que ele significa — sem mudança. Antes "subir" era
+ * esmeralda e "manter" era a marca; com os dois em verde, o veredito
+ * perdia a leitura à distância, que é como ele é lido entre séries.
+ */
 const VEREDITO: Record<ProgressionVerdict["action"], { rotulo: string; classe: string }> = {
-  subir: { rotulo: "Subir carga", classe: "border-good/40 bg-good/10 text-good" },
-  manter: { rotulo: "Manter carga", classe: "border-brand/40 bg-brand/10 text-brand" },
+  subir: { rotulo: "Subir carga", classe: "border-brand/40 bg-brand/10 text-brand" },
+  manter: { rotulo: "Manter carga", classe: "border-line bg-raised text-body" },
   reduzir: { rotulo: "Reduzir carga", classe: "border-bad/40 bg-bad/10 text-bad" },
   primeira_vez: { rotulo: "Primeira vez", classe: "border-line bg-raised text-muted" },
 };
@@ -452,16 +459,20 @@ function BarraDescanso({
       aria-live={acabou ? "assertive" : "off"}
       className={cn(
         "fixed inset-x-0 bottom-0 z-30 border-t bg-surface pb-[env(safe-area-inset-bottom,0px)]",
-        acabou ? "border-good" : "border-line",
+        // Fim do descanso é o momento mais importante da tela: fica com a
+        // marca, a cor mais clara da paleta. Correndo, a barra é só tempo
+        // passando, e neutro basta. Antes era âmbar contra esmeralda; com a
+        // marca em verde, dois verdes tiravam a leitura da virada.
+        acabou ? "border-brand" : "border-line",
       )}
     >
       <div className="h-1 bg-raised">
-        <div className={cn("h-full", acabou ? "bg-good" : "bg-brand")} style={{ width: `${fracao * 100}%` }} />
+        <div className={cn("h-full", acabou ? "bg-brand" : "bg-muted")} style={{ width: `${fracao * 100}%` }} />
       </div>
       <div className="mx-auto flex max-w-lg items-center gap-2 px-4 py-2">
         <div className="min-w-0 flex-1">
           <p className="text-xs text-faint">{acabou ? "Descanso concluído" : "Descanso"}</p>
-          <p className={cn("font-condensed text-3xl font-bold tabular-nums", acabou && "text-good")}>
+          <p className={cn("font-condensed text-3xl font-bold tabular-nums", acabou && "text-brand")}>
             {acabou ? "Hora da série" : agora === 0 ? "—" : clockLabel(restante)}
           </p>
         </div>
